@@ -848,29 +848,29 @@ function renderProfileScreen(){
   loadProfiles();
   const grid=document.getElementById('profileGrid');
   grid.innerHTML='';
-  for(let i=0;i<8;i++){
-    const p=profiles[i];
+  // Render all existing profiles
+  profiles.forEach(p=>{
     const d=document.createElement('div');
-    d.className='pcard'+(p?'':' empty');
-    if(p){
-      const s=loadSave(p.name);
-      const avEl=isPhoto(p.avatar)
-        ?'<div class="av"><img src="'+p.avatar+'" style="width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid var(--bord)"></div>'
-        :'<div class="av">'+p.avatar+'</div>';
-      d.innerHTML=avEl+'<div class="pn">'+p.name+'</div><div class="pi">🪙 '+s.coins.toLocaleString()+'</div><button class="peditbtn">✏️ Edit</button>';
-      d.querySelector('.peditbtn').onclick=e=>{ e.stopPropagation(); openEditProfile(p); };
-      d.onclick=()=>selectProfile(p);
-    } else {
-      d.innerHTML='<div class="av" style="opacity:.4;font-size:2rem">+</div><div class="pn" style="color:var(--muted)">New Profile</div>';
-      d.onclick=()=>showNewForm();
-    }
+    d.className='pcard';
+    const s=loadSave(p.name);
+    const avEl=isPhoto(p.avatar)
+      ?'<div class="av"><img src="'+p.avatar+'" style="width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid var(--bord)"></div>'
+      :'<div class="av">'+p.avatar+'</div>';
+    d.innerHTML=avEl+'<div class="pn">'+p.name+'</div><div class="pi">🪙 '+s.coins.toLocaleString()+'</div><button class="peditbtn">✏️ Edit</button>';
+    d.querySelector('.peditbtn').onclick=e=>{ e.stopPropagation(); openEditProfile(p); };
+    d.onclick=()=>selectProfile(p);
     grid.appendChild(d);
-  }
+  });
+  // Always show one "+ New Profile" slot at the end
+  const add=document.createElement('div');
+  add.className='pcard empty';
+  add.innerHTML='<div class="av" style="opacity:.4;font-size:2rem">+</div><div class="pn" style="color:var(--muted)">New Profile</div>';
+  add.onclick=()=>showNewForm();
+  grid.appendChild(add);
 }
 // ── New profile form ──────────────────────────────────────────
 let _newAv=AVATARS[0];
 function showNewForm(){
-  if(profiles.length>=8){ toast('Max 8 profiles'); return; }
   _newAv=AVATARS[0];
   const f=document.getElementById('newProfileForm');
   f.style.display='flex';
