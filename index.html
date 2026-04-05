@@ -611,6 +611,7 @@ const RARITY_COLOR = {
 const RARITY_PTS = {common:10,uncommon:25,rare:60,epic:150,legendary:400,mythic:1000,celestial:3000,prismatic:10000};
 const SELL_PRICE = {common:50,uncommon:120,rare:350,epic:800,legendary:2000,mythic:5000,celestial:15000,prismatic:50000};
 let sellPriceOverrides = {}; // admin-set overrides per rarity
+let dailySettings = {coins:150, cooldownHours:24}; // admin-controlled daily reward
 function getSellPrice(rarity){ return sellPriceOverrides[rarity] ?? SELL_PRICE[rarity] ?? 0; }
 const NEON_COST  = {common:200,uncommon:500,rare:1200,epic:3000,legendary:8000,mythic:20000,celestial:60000,prismatic:200000};
 const RAR_ORDER  = ['common','uncommon','rare','epic','legendary','mythic','celestial','prismatic'];
@@ -884,6 +885,14 @@ function loadSellPrices(){
 function saveSellPrices(){
   localStorage.setItem('ev2_sell_prices', JSON.stringify(sellPriceOverrides));
   db.ref('sellPrices').set(sellPriceOverrides);
+}
+function loadDailySettings(){
+  try{ const d=JSON.parse(localStorage.getItem('ev2_daily_settings')||'null'); if(d) dailySettings={...dailySettings,...d}; }catch(e){}
+  db.ref('dailySettings').once('value',snap=>{ if(snap.val()) dailySettings={...dailySettings,...snap.val()}; });
+}
+function saveDailySettings(){
+  localStorage.setItem('ev2_daily_settings', JSON.stringify(dailySettings));
+  db.ref('dailySettings').set(dailySettings);
 }
 function adminAddCustomPet(name, emoji, rarity, count){
   const id = 'custom_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
@@ -1303,6 +1312,7 @@ function initApp(){
   loadCustomPets();
   loadToolAdmin();
   loadSellPrices();
+  loadDailySettings();
   updateCoins();
   updateVaultDisplay(0);
   renderHatch();
@@ -3936,26 +3946,49 @@ function renderNpcTrade(){
 // ══════════════════════════════════════════════
 //  DAILY
 // ══════════════════════════════════════════════
+function _dailyCanClaim(){
+  if(!save) return false;
+  const cooldownMs = (dailySettings.cooldownHours||24)*3600000;
+  if(cooldownMs<=0) return true; // unlimited
+  const last = save.lastDailyTs||0;
+  return (Date.now()-last) >= cooldownMs;
+}
+function _dailyNextIn(){
+  const cooldownMs=(dailySettings.cooldownHours||24)*3600000;
+  const last=save.lastDailyTs||0;
+  const ms=cooldownMs-(Date.now()-last);
+  if(ms<=0) return '';
+  const h=Math.floor(ms/3600000);
+  const m=Math.floor((ms%3600000)/60000);
+  return h>0?h+'h '+m+'m':m+'m';
+}
 function renderDaily(){
   if(!save) return;
-  const last=save.lastDaily||'';
-  const today=new Date().toDateString();
-  const claimed=last===today;
+  const canClaim=_dailyCanClaim();
+  const coins=dailySettings.coins||150;
   const btn=document.getElementById('dailyBtn');
   const status=document.getElementById('dailyStatus');
-  btn.disabled=claimed;
-  if(claimed){ status.textContent='Already claimed today! Come back tomorrow.'; }
-  else { status.textContent=''; }
+  const cd=dailySettings.cooldownHours||24;
+  btn.textContent='🪙 Claim '+coins+' Coins';
+  btn.disabled=!canClaim;
+  if(!canClaim){
+    const next=_dailyNextIn();
+    status.textContent=next?'Next claim in '+next+'.':'Come back later!';
+  } else { status.textContent=''; }
+  // update static description too
+  const desc=document.querySelector('#daily p');
+  if(desc) desc.textContent='Claim '+coins+' coins'+(cd>0?' every '+cd+' hour'+(cd!==1?'s':''):'');
 }
 function claimDaily(){
   if(!save) return;
-  const today=new Date().toDateString();
-  if(save.lastDaily===today){ toast('Already claimed!'); return; }
-  save.lastDaily=today;
-  save.coins+=150;
+  if(!_dailyCanClaim()){ toast('Not yet! '+_dailyNextIn()+' remaining'); return; }
+  const coins=dailySettings.coins||150;
+  save.lastDailyTs=Date.now();
+  save.lastDaily=new Date().toDateString(); // keep for compat
+  save.coins+=coins;
   writeSave(); updateCoins(); renderDaily();
   snd('daily');
-  toast('🎁 +150 coins claimed!');
+  toast('🎁 +'+coins+' coins claimed!');
 }
 
 // ══════════════════════════════════════════════
@@ -4078,8 +4111,14 @@ function renderVaultAdminPanel(container){
 
   tabNew.onclick   = ()=>{ _apMode='new-pet';      renderVault(); };
   tabTools.onclick = ()=>{ _apMode='tools';         renderVault(); };
-  tabSell.onclick  = ()=>{ _apMode='sell-prices';   renderVault(); };
-  tabBar.appendChild(tabProp); tabBar.appendChild(tabRar); tabBar.appendChild(tabNew); tabBar.appendChild(tabTools); tabBar.appendChild(tabSell);
+  const tabDaily = document.createElement('div');
+  tabDaily.className = 'ap-tab'+(_apMode==='daily-settings'?' on':'');
+  tabDaily.style.color = _apMode==='daily-settings'?'#fff':'#22cc77';
+  tabDaily.textContent = '🎁 Daily';
+
+  tabSell.onclick  = ()=>{ _apMode='sell-prices';      renderVault(); };
+  tabDaily.onclick = ()=>{ _apMode='daily-settings';   renderVault(); };
+  tabBar.appendChild(tabProp); tabBar.appendChild(tabRar); tabBar.appendChild(tabNew); tabBar.appendChild(tabTools); tabBar.appendChild(tabSell); tabBar.appendChild(tabDaily);
   panel.appendChild(tabBar);
 
   if(_apMode === 'proportional'){
@@ -4942,6 +4981,74 @@ function renderVaultAdminPanel(container){
             +'</div>';
         }).join('');
     panel.appendChild(previewDiv);
+
+  } else if(_apMode === 'daily-settings'){
+    // ── Daily Reward admin ───────────────────────────────────────
+    const dsNote = document.createElement('div');
+    dsNote.className='ap-note';
+    dsNote.textContent='Control the daily reward your kids receive. Changes apply immediately for all players.';
+    panel.appendChild(dsNote);
+
+    const dsForm = document.createElement('div');
+    dsForm.style.cssText='display:flex;flex-direction:column;gap:12px;margin-top:8px';
+
+    // Coins row
+    const coinsRow = document.createElement('div');
+    coinsRow.style.cssText='display:flex;align-items:center;gap:12px;background:var(--surf2);border:1.5px solid var(--gold)44;border-radius:10px;padding:10px 14px';
+    const coinsIcon = document.createElement('div'); coinsIcon.style.cssText='font-size:1.6rem'; coinsIcon.textContent='🪙';
+    const coinsInfo = document.createElement('div'); coinsInfo.style.cssText='flex:1';
+    const coinsLbl = document.createElement('div'); coinsLbl.style.cssText='font-size:.78rem;font-weight:700;color:var(--txt)'; coinsLbl.textContent='Coins per claim';
+    const coinsSub = document.createElement('div'); coinsSub.style.cssText='font-size:.65rem;color:var(--muted)'; coinsSub.textContent='How many coins kids get each time';
+    coinsInfo.appendChild(coinsLbl); coinsInfo.appendChild(coinsSub);
+    const coinsInp = document.createElement('input');
+    coinsInp.type='number'; coinsInp.min='0'; coinsInp.max='99999'; coinsInp.value=dailySettings.coins||150;
+    coinsInp.style.cssText='width:90px;background:var(--surf);border:1.5px solid var(--gold)66;color:var(--gold);border-radius:8px;padding:7px 10px;font-size:1rem;font-weight:900;text-align:center;outline:none';
+    coinsRow.appendChild(coinsIcon); coinsRow.appendChild(coinsInfo); coinsRow.appendChild(coinsInp);
+    dsForm.appendChild(coinsRow);
+
+    // Cooldown row
+    const cdRow = document.createElement('div');
+    cdRow.style.cssText='display:flex;align-items:center;gap:12px;background:var(--surf2);border:1.5px solid #22cc7744;border-radius:10px;padding:10px 14px';
+    const cdIcon = document.createElement('div'); cdIcon.style.cssText='font-size:1.6rem'; cdIcon.textContent='⏱️';
+    const cdInfo = document.createElement('div'); cdInfo.style.cssText='flex:1';
+    const cdLbl = document.createElement('div'); cdLbl.style.cssText='font-size:.78rem;font-weight:700;color:var(--txt)'; cdLbl.textContent='Cooldown (hours)';
+    const cdSub = document.createElement('div'); cdSub.style.cssText='font-size:.65rem;color:var(--muted)'; cdSub.textContent='Hours between claims — set 0 for unlimited';
+    cdInfo.appendChild(cdLbl); cdInfo.appendChild(cdSub);
+    const cdInp = document.createElement('input');
+    cdInp.type='number'; cdInp.min='0'; cdInp.max='168'; cdInp.value=dailySettings.cooldownHours??24;
+    cdInp.style.cssText='width:70px;background:var(--surf);border:1.5px solid #22cc7766;color:#22cc77;border-radius:8px;padding:7px 10px;font-size:1rem;font-weight:900;text-align:center;outline:none';
+    cdRow.appendChild(cdIcon); cdRow.appendChild(cdInfo); cdRow.appendChild(cdInp);
+    dsForm.appendChild(cdRow);
+
+    // Quick preset buttons
+    const presetsRow = document.createElement('div');
+    presetsRow.style.cssText='display:flex;gap:6px;flex-wrap:wrap';
+    const presetLbl = document.createElement('div');
+    presetLbl.style.cssText='font-size:.72rem;color:var(--muted);width:100%';
+    presetLbl.textContent='Quick presets:';
+    presetsRow.appendChild(presetLbl);
+    [{label:'Once a day',coins:150,cd:24},{label:'Twice a day',coins:100,cd:12},{label:'Every hour',coins:50,cd:1},{label:'Unlimited',coins:50,cd:0}].forEach(p=>{
+      const pb=document.createElement('button');
+      pb.style.cssText='background:var(--surf2);border:1.5px solid var(--bord);border-radius:8px;padding:6px 12px;font-size:.75rem;font-weight:700;color:var(--txt);cursor:pointer';
+      pb.textContent=p.label;
+      pb.onclick=()=>{ coinsInp.value=p.coins; cdInp.value=p.cd; };
+      presetsRow.appendChild(pb);
+    });
+    dsForm.appendChild(presetsRow);
+
+    // Save button
+    const dsSaveBtn = document.createElement('button');
+    dsSaveBtn.className='ap-apply'; dsSaveBtn.textContent='💾 Save Daily Settings';
+    dsSaveBtn.onclick=()=>{
+      const coins=parseInt(coinsInp.value,10)||0;
+      const cd=parseFloat(cdInp.value)||0;
+      dailySettings={coins,cooldownHours:cd};
+      saveDailySettings();
+      renderDaily();
+      toast('✔ Daily reward: 🪙'+coins+(cd>0?' every '+cd+'h':' unlimited'));
+    };
+    dsForm.appendChild(dsSaveBtn);
+    panel.appendChild(dsForm);
   }
 
   container.appendChild(panel);
