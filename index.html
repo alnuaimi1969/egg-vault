@@ -396,6 +396,8 @@ nav button:hover:not(.on){color:var(--txt)}
       </div>
     </div>
     <input id="pNameInput" type="text" placeholder="Your name…" maxlength="16">
+    <div style="font-size:.75rem;color:var(--muted)">🔒 Choose a 4-digit PIN (required)</div>
+    <input id="pPinInput" type="password" inputmode="numeric" maxlength="4" placeholder="••••" style="background:var(--surf);border:1px solid var(--bord);color:var(--txt);padding:10px 14px;border-radius:10px;font-size:1.4rem;letter-spacing:8px;width:100%;box-sizing:border-box;outline:none;text-align:center">
     <button class="btn btn-p" style="width:100%" onclick="createProfile()">✔ Create Profile</button>
   </div>
 </div>
@@ -410,7 +412,7 @@ nav button:hover:not(.on){color:var(--txt)}
     <div style="font-size:.75rem;color:var(--muted);text-align:center">— or pick an emoji —</div>
     <div class="avpick" id="epAvPick"></div>
     <input id="epNameInput" type="text" placeholder="Name…" maxlength="16" style="background:var(--surf);border:1px solid var(--bord);color:var(--txt);padding:10px 14px;border-radius:10px;font-size:1rem;width:100%;box-sizing:border-box;outline:none">
-    <div style="font-size:.75rem;color:var(--muted)">🔒 PIN (4 digits — leave blank for no lock)</div>
+    <div style="font-size:.75rem;color:var(--muted)">🔒 PIN (4 digits — required)</div>
     <input id="epPinInput" type="password" inputmode="numeric" maxlength="4" placeholder="Set PIN…" style="background:var(--surf);border:1px solid var(--bord);color:var(--txt);padding:10px 14px;border-radius:10px;font-size:1.2rem;letter-spacing:6px;width:100%;box-sizing:border-box;outline:none">
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-p" style="flex:1" onclick="saveEditProfile()">Save</button>
@@ -1098,7 +1100,8 @@ function renderProfileScreen(){
     const avEl=isPhoto(p.avatar)
       ?'<div class="av"><img src="'+p.avatar+'" style="width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid var(--bord)"></div>'
       :'<div class="av">'+p.avatar+'</div>';
-    d.innerHTML=avEl+'<div class="pn">'+p.name+'</div><div class="pi">🪙 '+s.coins.toLocaleString()+'</div>';
+    const pinTag=p.pin?'<div style="font-size:.6rem;color:var(--muted);margin-top:1px">🔒 PIN</div>':'<div style="font-size:.6rem;color:#ff3060;margin-top:1px">⚠️ Set PIN</div>';
+    d.innerHTML=avEl+'<div class="pn">'+p.name+'</div><div class="pi">🪙 '+s.coins.toLocaleString()+'</div>'+pinTag;
     if(profileAdminUnlocked){
       // In admin mode: show delete button, clicking card does nothing
       const delBtn=document.createElement('button');
@@ -1130,6 +1133,7 @@ function showNewForm(){
   const f=document.getElementById('newProfileForm');
   f.style.display='flex';
   document.getElementById('pNameInput').value='';
+  document.getElementById('pPinInput').value='';
   const prev=document.getElementById('newAvPreview');
   prev.textContent=_newAv; prev.innerHTML=_newAv;
   const ap=document.getElementById('avPick');
@@ -1146,10 +1150,11 @@ function hideNewForm(){ document.getElementById('newProfileForm').style.display=
 function createProfile(){
   const name=document.getElementById('pNameInput').value.trim();
   if(!name){ toast('Enter a name!'); return; }
-  if(profiles.find(p=>p.name===name)){ toast('Name taken locally!'); return; }
-  profiles.push({name,avatar:_newAv});
+  const pin=document.getElementById('pPinInput').value.trim();
+  if(!/^\d{4}$/.test(pin)){ toast('PIN must be exactly 4 digits'); return; }
+  if(profiles.find(p=>p.name===name)){ toast('Name already taken!'); return; }
+  profiles.push({name,avatar:_newAv,pin});
   saveProfiles();
-  // Write profile avatar to Firebase so leaderboard can show it
   db.ref('players/'+name+'/profile').set({avatar:_newAv,lastSeen:Date.now()});
   hideNewForm(); renderProfileScreen();
 }
@@ -1205,7 +1210,8 @@ function saveEditProfile(){
   _editTarget.name=newName;
   _editTarget.avatar=_editAv||_editTarget.avatar;
   const newPin=document.getElementById('epPinInput').value.trim();
-  _editTarget.pin=newPin||null;
+  if(!/^\d{4}$/.test(newPin)){ toast('PIN must be exactly 4 digits'); return; }
+  _editTarget.pin=newPin;
   db.ref('players/'+newName+'/profile').set({avatar:_editTarget.avatar,lastSeen:Date.now()});
   saveProfiles();
   closeEditProfile();
@@ -1244,21 +1250,23 @@ function deleteProfile(){
 }
 let _pendingProfile=null;
 function selectProfile(p){
-  if(p.pin){
-    // Show PIN overlay
-    _pendingProfile=p;
-    const av=document.getElementById('pinAvatar');
-    const nm=document.getElementById('pinName');
-    if(isPhoto(p.avatar)) av.innerHTML='<img src="'+p.avatar+'" style="width:64px;height:64px;border-radius:50%;object-fit:cover">';
-    else av.textContent=p.avatar||'🐾';
-    nm.textContent=p.name;
-    document.getElementById('pinInput').value='';
-    document.getElementById('pinError').style.display='none';
-    document.getElementById('pinOverlay').style.display='flex';
-    setTimeout(()=>document.getElementById('pinInput').focus(),100);
+  // If profile has no PIN (old profile), force them to set one first
+  if(!p.pin){
+    openEditProfile(p);
+    toast('Please set a 4-digit PIN for this profile');
     return;
   }
-  enterProfile(p);
+  // Always require PIN
+  _pendingProfile=p;
+  const av=document.getElementById('pinAvatar');
+  const nm=document.getElementById('pinName');
+  if(isPhoto(p.avatar)) av.innerHTML='<img src="'+p.avatar+'" style="width:64px;height:64px;border-radius:50%;object-fit:cover">';
+  else av.textContent=p.avatar||'🐾';
+  nm.textContent=p.name;
+  document.getElementById('pinInput').value='';
+  document.getElementById('pinError').style.display='none';
+  document.getElementById('pinOverlay').style.display='flex';
+  setTimeout(()=>document.getElementById('pinInput').focus(),100);
 }
 function submitPin(){
   const entered=document.getElementById('pinInput').value;
