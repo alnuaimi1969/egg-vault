@@ -6107,355 +6107,375 @@ function cancelTrade(tradeId){
 }
 
 // ══════════════════════════════════════════════
-//  BATTLE SYSTEM
+//  BATTLE SYSTEM v2 — Fair Blind Duel
+//  Neither player sees the opponent's pick until
+//  BOTH have locked in → simultaneous reveal!
+//  Tie = deterministic dice roll from battleId
 // ══════════════════════════════════════════════
-let _battleChallengeTo = null;
-let _battlePickPetId = null;
+let _onlinePlayers = {}; // name→true, kept in sync with /online
 
 function setupBattleListener(){
-  // Listen for battles where I'm the defender (incoming challenges)
-  db.ref('battles').orderByChild('to').equalTo(currentUser).on('value', snap=>{
-    let pending = 0;
-    if(snap.val()) Object.values(snap.val()).forEach(b=>{ if(b.status==='pending') pending++; });
-    const badge = document.getElementById('battleBadge');
-    if(badge){ badge.style.display=pending>0?'inline-flex':'none'; badge.textContent=pending; }
+  // Keep a live copy of who's online for the battle tab
+  db.ref('online').on('value', snap=>{
+    _onlinePlayers = snap.val()||{};
     if(document.getElementById('battle')?.classList.contains('on')) renderBattle();
-    // Notification sound + toast for new incoming challenge
-    if(pending>0){
-      const vals = snap.val() ? Object.values(snap.val()).filter(b=>b.status==='pending') : [];
-      vals.forEach(b=>{
-        const key = 'bnotif_'+b.ts;
+  });
+
+  // Incoming battles (I'm the defender)
+  db.ref('battles').orderByChild('to').equalTo(currentUser).on('value', snap=>{
+    const vals = snap.val()||{};
+    let pending=0;
+    Object.entries(vals).forEach(([bid,b])=>{
+      if(b.status==='pending') pending++;
+      // Toast+sound for new pending challenges
+      if(b.status==='pending'){
+        const key='bpend_'+bid;
         if(!sessionStorage.getItem(key)){
           sessionStorage.setItem(key,'1');
           snd('chat');
           toast('⚔️ '+b.from+' challenges you to a battle!');
         }
-      });
-    }
+      }
+      // Toast when I won a resolved battle
+      if(b.status==='done' && b.winner===currentUser){
+        const key='bwin_in_'+bid;
+        if(!sessionStorage.getItem(key)){
+          sessionStorage.setItem(key,'1');
+          snd('hatch');
+          const pr=PETS.find(p=>p.id===b.prizePetId);
+          toast('🏆 You won the battle vs '+b.from+'! Got '+(pr?.emoji||'🐾')+'!');
+          // Refresh local save
+          db.ref('players/'+currentUser+'/save').once('value',ss=>{ if(ss.val()){save=ss.val();writeSave();localStorage.setItem('ev2_save_'+currentUser,JSON.stringify(save));renderCollection();} });
+        }
+      }
+      // Try resolving if both picks are in
+      if(b.status==='picking' && b.fromPick && b.toPick) tryResolveBattle(bid,b);
+    });
+    const badge=document.getElementById('battleBadge');
+    if(badge){ badge.style.display=pending>0?'inline-flex':'none'; badge.textContent=pending; }
+    if(document.getElementById('battle')?.classList.contains('on')) renderBattle();
   });
-  // Also re-render when my sent battles get resolved
+
+  // My sent battles (I'm the challenger)
   db.ref('battles').orderByChild('from').equalTo(currentUser).on('value', snap=>{
+    const vals=snap.val()||{};
+    Object.entries(vals).forEach(([bid,b])=>{
+      // Toast when I won
+      if(b.status==='done' && b.winner===currentUser){
+        const key='bwin_out_'+bid;
+        if(!sessionStorage.getItem(key)){
+          sessionStorage.setItem(key,'1');
+          snd('hatch');
+          const pr=PETS.find(p=>p.id===b.prizePetId);
+          toast('🏆 You won the battle vs '+b.to+'! Got '+(pr?.emoji||'🐾')+'!');
+          db.ref('players/'+currentUser+'/save').once('value',ss=>{ if(ss.val()){save=ss.val();writeSave();localStorage.setItem('ev2_save_'+currentUser,JSON.stringify(save));renderCollection();} });
+        }
+      }
+      // Also check for resolution (both picked)
+      if(b.status==='picking' && b.fromPick && b.toPick) tryResolveBattle(bid,b);
+    });
     if(document.getElementById('battle')?.classList.contains('on')) renderBattle();
   });
 }
 
+// ── Battle rules ─────────────────────────────
+//  Prismatic pets are excluded from battles.
+//  Exactly +1 rarity step above  → WIN, take their pet
+//  Same rarity                   → dice roll, winner takes pet
+//  +2 or more steps above        → WIN but no pet transfer ("too powerful!")
+//  Lower rarity                  → LOSE
+//
+//  Blind duel: both players pick secretly → simultaneous reveal
+//  Only online players can be challenged
+// ─────────────────────────────────────────────
+
+function _battlePetList(){
+  return PETS.filter(p=>(save?.pets?.[p.id]||0)>0);
+}
+
+// Deterministic dice from battleId (same result on both clients)
+function _bDice(battleId, who){
+  let h=who==='from'?0x1234:0x5678;
+  for(const c of battleId) h=(h*31+c.charCodeAt(0))&0x7fffffff;
+  return (h%6)+1;
+}
+
 function renderBattle(){
-  const container = document.getElementById('battleContent');
+  const container=document.getElementById('battleContent');
   if(!container) return;
-  container.innerHTML = '<div style="color:var(--muted);font-size:.85rem;text-align:center;padding:20px">Loading…</div>';
+  container.innerHTML='<div style="color:var(--muted);font-size:.85rem;text-align:center;padding:20px">Loading…</div>';
 
-  const p1 = db.ref('leaderboard').once('value');
-  const p2 = db.ref('battles').orderByChild('to').equalTo(currentUser).once('value');
-  const p3 = db.ref('battles').orderByChild('from').equalTo(currentUser).once('value');
+  const p2=db.ref('battles').orderByChild('to').equalTo(currentUser).once('value');
+  const p3=db.ref('battles').orderByChild('from').equalTo(currentUser).once('value');
 
-  Promise.all([p1,p2,p3]).then(([lSnap,inSnap,outSnap])=>{
-    const allPlayers = Object.values(lSnap.val()||{}).filter(p=>p.name!==currentUser);
-    const inBattles = inSnap.val()||{};
-    const outBattles = outSnap.val()||{};
-    container.innerHTML = '';
+  Promise.all([p2,p3]).then(([inSnap,outSnap])=>{
+    const inBattles=inSnap.val()||{};
+    const outBattles=outSnap.val()||{};
+    container.innerHTML='';
 
-    // ── Incoming challenges (pending — I need to pick a pet) ──
-    const incoming = Object.entries(inBattles).filter(([,b])=>b.status==='pending');
-    if(incoming.length){
-      const sec = document.createElement('div');
-      sec.innerHTML = '<div class="stitle" style="font-size:.85rem;margin-bottom:8px">⚔️ Incoming Challenges ('+incoming.length+')</div>';
-      incoming.forEach(([bid,b])=>{
-        const from = allPlayers.find(p=>p.name===b.from)||{};
-        const avEl = isPhoto(from.avatar)?`<img src="${from.avatar}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:middle">`:`<span style="font-size:1.4rem">${from.avatar||'🐾'}</span>`;
-        const card = document.createElement('div');
-        card.className = 'battle-card battle-anim';
-        card.innerHTML = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">${avEl} <strong>${b.from}</strong> challenges you!</div>
-          <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;flex-wrap:wrap">
-            <div style="text-align:center">
-              <div style="font-size:2.2rem">${b.fromPet.emoji}</div>
-              <div style="font-size:.7rem;color:var(--muted)">${b.fromPet.name}</div>
-              <div style="font-size:.65rem;font-weight:800;color:${RARITY_COLOR[b.fromPet.rarity]||'var(--muted)'};text-transform:uppercase">${b.fromPet.rarity}</div>
-            </div>
-            <div style="font-size:1.4rem;color:var(--muted)">⚔️</div>
-            <div style="font-size:.82rem;color:var(--muted)">Pick your pet to fight!</div>
-          </div>`;
-        // Pet picker
-        const myPets = PETS.filter(p=>(save?.pets?.[p.id]||0)>0);
-        if(!myPets.length){
-          card.innerHTML += '<div style="color:var(--muted);font-size:.8rem">You have no pets to fight with!</div>';
-          const dBtn = document.createElement('button');
-          dBtn.className='btn btn-s btn-sm'; dBtn.style.color='#ff3060'; dBtn.textContent='❌ Decline';
-          dBtn.onclick=()=>declineBattle(bid);
-          card.appendChild(dBtn);
-        } else {
-          const pickLabel = document.createElement('div');
-          pickLabel.style.cssText='font-size:.75rem;color:var(--muted);margin-bottom:6px';
-          pickLabel.textContent='Your fighter:';
-          card.appendChild(pickLabel);
-          const grid = document.createElement('div');
-          grid.className = 'battle-pick-grid';
-          let pickedId = null;
-          myPets.forEach(p=>{
-            const sp = document.createElement('div');
-            sp.className='battle-pick-pet';
-            sp.title=p.name+' ('+p.rarity+')';
-            sp.innerHTML=`<div>${p.emoji}</div><div style="font-size:.55rem;color:${RARITY_COLOR[p.rarity]||'var(--muted)'};font-weight:800;text-transform:uppercase">${p.rarity[0].toUpperCase()}</div>`;
-            sp.onclick=()=>{
-              grid.querySelectorAll('.battle-pick-pet').forEach(x=>x.classList.remove('sel'));
-              sp.classList.add('sel');
-              pickedId = p.id;
-              fightBtn.disabled = false;
-            };
-            grid.appendChild(sp);
-          });
-          card.appendChild(grid);
-          const btnRow = document.createElement('div');
-          btnRow.style.cssText='display:flex;gap:8px;margin-top:12px';
-          const fightBtn = document.createElement('button');
-          fightBtn.className='btn btn-p btn-sm'; fightBtn.disabled=true;
-          fightBtn.textContent='⚔️ Fight!';
-          fightBtn.onclick=()=>{
-            if(!pickedId){ toast('Pick a pet first!'); return; }
-            acceptBattle(bid, b, pickedId);
-          };
-          const dBtn2 = document.createElement('button');
-          dBtn2.className='btn btn-s btn-sm'; dBtn2.style.color='#ff3060'; dBtn2.textContent='❌ Decline';
-          dBtn2.onclick=()=>declineBattle(bid);
-          btnRow.appendChild(fightBtn); btnRow.appendChild(dBtn2);
-          card.appendChild(btnRow);
-        }
-        sec.appendChild(card);
-      });
-      container.appendChild(sec);
-    }
-
-    // ── Waiting for opponent ──
-    const waiting = Object.entries(outBattles).filter(([,b])=>b.status==='pending');
-    if(waiting.length){
-      const sec2 = document.createElement('div');
-      sec2.innerHTML='<div class="stitle" style="font-size:.85rem;margin-bottom:8px;margin-top:8px">⏳ Waiting for Response</div>';
-      waiting.forEach(([bid,b])=>{
-        const card = document.createElement('div');
-        card.className='battle-card';
-        card.style.opacity='.85';
-        card.innerHTML=`<div style="font-size:.85rem;margin-bottom:6px">You challenged <strong>${b.to}</strong> with <span style="font-size:1.3rem">${b.fromPet.emoji}</span> <span style="color:${RARITY_COLOR[b.fromPet.rarity]||'var(--muted)'}; font-size:.75rem;font-weight:700">${b.fromPet.rarity}</span></div>
-          <div style="font-size:.78rem;color:var(--muted)">Waiting for them to pick a pet…</div>`;
-        const cancelBtn = document.createElement('button');
-        cancelBtn.className='btn btn-s btn-sm'; cancelBtn.style.cssText='font-size:.75rem;margin-top:8px;color:#ff3060';
-        cancelBtn.textContent='✕ Cancel';
-        cancelBtn.onclick=()=>cancelBattle(bid);
-        card.appendChild(cancelBtn);
-        sec2.appendChild(card);
-      });
-      container.appendChild(sec2);
-    }
-
-    // ── Battle history ──
-    const allMine = [...Object.entries(inBattles),...Object.entries(outBattles)];
-    const done = allMine.filter(([,b])=>b.status==='done'||b.status==='declined').slice(-6).reverse();
-    if(done.length){
-      const hSec = document.createElement('div');
-      hSec.innerHTML='<div class="stitle" style="font-size:.85rem;margin-bottom:8px;margin-top:8px">📋 Battle History</div>';
-      done.forEach(([,b])=>{
-        const card = document.createElement('div');
-        const isFrom = b.from===currentUser;
-        const opponent = isFrom?b.to:b.from;
-        let resClass='', resIcon='', resText='';
-        if(b.status==='declined'){
-          resClass='battle-result-draw'; resIcon='❌'; resText='Declined';
-        } else if(b.winner==='draw'){
-          resClass='battle-result-draw'; resIcon='🤝'; resText='Draw!';
-        } else if(b.winner===currentUser){
-          resClass='battle-result-win'; resIcon='🏆'; resText='You Won!';
-        } else {
-          resClass='battle-result-lose'; resIcon='💀'; resText='You Lost';
-        }
-        card.className='battle-card '+resClass;
-        const myPetObj = isFrom?b.fromPet:b.toPet;
-        const theirPetObj = isFrom?b.toPet:b.fromPet;
-        card.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <span style="font-size:1.4rem">${resIcon}</span>
-          <strong style="font-size:.95rem">${resText}</strong>
-          <span style="color:var(--muted);font-size:.78rem">vs ${opponent}</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:12px;font-size:.8rem;flex-wrap:wrap">
-          <span>${myPetObj?myPetObj.emoji:''} <span style="color:${RARITY_COLOR[myPetObj?.rarity]||'var(--muted)'};">${myPetObj?.rarity||''}</span></span>
-          <span style="color:var(--muted)">vs</span>
-          <span>${theirPetObj?theirPetObj.emoji:''} <span style="color:${RARITY_COLOR[theirPetObj?.rarity]||'var(--muted)'};">${theirPetObj?.rarity||''}</span></span>
-          ${b.winner&&b.winner!=='draw'&&b.status!=='declined'?`<span style="color:${RARITY_COLOR[b.prizeRarity]||'var(--gold)'};font-size:.72rem">${b.winner===currentUser?'🎁 Got: '+b.prizePet:'Lost: '+b.prizePet}</span>`:''}
+    // ── 1. INCOMING CHALLENGES (pending accept/decline) ──
+    const pending=Object.entries(inBattles).filter(([,b])=>b.status==='pending');
+    pending.forEach(([bid,b])=>{
+      const prof=profiles.find(p=>p.name===b.from)||{};
+      const avEl=isPhoto(prof.avatar)?`<img src="${prof.avatar}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:middle">`:`<span style="font-size:1.4rem">${prof.avatar||'🐾'}</span>`;
+      const sec=document.createElement('div');
+      sec.innerHTML='<div class="stitle" style="font-size:.85rem;margin-bottom:8px">⚔️ Challenge!</div>';
+      const card=document.createElement('div'); card.className='battle-card battle-anim';
+      card.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">${avEl}<strong>${b.from}</strong> challenges you to a duel!</div>
+        <div style="font-size:.78rem;color:var(--muted);margin-bottom:12px;background:var(--surf);padding:8px 10px;border-radius:8px">
+          Pick secretly → revealed at once → 🏆 +1 step wins pet &nbsp;•&nbsp; 🎲 same = dice &nbsp;•&nbsp; 🛡️ +2 = no prize &nbsp;•&nbsp; 💥 ±3 or more = challenger loses their own pet!
         </div>`;
+      const btnRow=document.createElement('div'); btnRow.style.cssText='display:flex;gap:8px';
+      const accBtn=document.createElement('button'); accBtn.className='btn btn-p btn-sm'; accBtn.textContent='⚔️ Accept Duel!';
+      accBtn.onclick=()=>acceptBattleChallenge(bid);
+      const decBtn=document.createElement('button'); decBtn.className='btn btn-s btn-sm'; decBtn.style.color='#ff3060'; decBtn.textContent='❌ Decline';
+      decBtn.onclick=()=>declineBattle(bid);
+      btnRow.appendChild(accBtn); btnRow.appendChild(decBtn);
+      card.appendChild(btnRow);
+      sec.appendChild(card); container.appendChild(sec);
+    });
+
+    // ── 2. PICK PHASE — I still need to lock in my pet ──
+    // Incoming: accepted, toPick not yet set (I'm defender)
+    const pickIncoming=Object.entries(inBattles).filter(([,b])=>b.status==='picking'&&!b.toPick);
+    // Outgoing: accepted, fromPick not yet set (I'm challenger)
+    const pickOutgoing=Object.entries(outBattles).filter(([,b])=>b.status==='picking'&&!b.fromPick);
+    [...pickIncoming,...pickOutgoing].forEach(([bid,b])=>{
+      const opponent=b.from===currentUser?b.to:b.from;
+      const sec=document.createElement('div');
+      sec.innerHTML='<div class="stitle" style="font-size:.85rem;margin-bottom:8px">🎯 Pick Your Fighter!</div>';
+      const card=document.createElement('div'); card.className='battle-card battle-anim';
+      card.innerHTML=`<div style="font-size:.88rem;margin-bottom:4px">Dueling <strong>${opponent}</strong></div>
+        <div style="font-size:.75rem;color:var(--muted);margin-bottom:10px">Your pick is hidden until ${opponent} also picks — then both revealed at once! No prismatic.</div>`;
+      const myPets=_battlePetList();
+      if(!myPets.length){
+        card.innerHTML+='<div style="color:var(--muted);font-size:.8rem;margin-bottom:10px">You have no battle-eligible pets!</div>';
+        const dBtn=document.createElement('button'); dBtn.className='btn btn-s btn-sm'; dBtn.style.color='#ff3060'; dBtn.textContent='❌ Forfeit';
+        dBtn.onclick=()=>declineBattle(bid);
+        card.appendChild(dBtn);
+      } else {
+        const grid=document.createElement('div'); grid.className='battle-pick-grid';
+        let picked=null;
+        const lockBtn=document.createElement('button'); lockBtn.className='btn btn-p btn-sm'; lockBtn.style.marginTop='12px'; lockBtn.disabled=true; lockBtn.textContent='🔒 Lock In!';
+        myPets.forEach(p=>{
+          const sp=document.createElement('div'); sp.className='battle-pick-pet';
+          sp.title=p.name+' ('+p.rarity+')';
+          sp.innerHTML=`<div style="font-size:1.8rem">${p.emoji}</div><div style="font-size:.55rem;color:${RARITY_COLOR[p.rarity]||'var(--muted)'};font-weight:800;text-transform:uppercase">${p.rarity}</div>`;
+          sp.onclick=()=>{ grid.querySelectorAll('.battle-pick-pet').forEach(x=>x.classList.remove('sel')); sp.classList.add('sel'); picked=p.id; lockBtn.disabled=false; };
+          grid.appendChild(sp);
+        });
+        card.appendChild(grid);
+        lockBtn.onclick=()=>{ if(picked) submitBattlePick(bid,b,picked); };
+        card.appendChild(lockBtn);
+      }
+      sec.appendChild(card); container.appendChild(sec);
+    });
+
+    // ── 3. WAITING — I locked in, opponent hasn't yet ──
+    const waitIncoming=Object.entries(inBattles).filter(([,b])=>b.status==='picking'&&b.toPick);
+    const waitOutgoing=Object.entries(outBattles).filter(([,b])=>b.status==='picking'&&b.fromPick);
+    [...waitIncoming,...waitOutgoing].forEach(([bid,b])=>{
+      const opponent=b.from===currentUser?b.to:b.from;
+      const myPick=b.from===currentUser?b.fromPick:b.toPick;
+      const sec=document.createElement('div');
+      sec.innerHTML='<div class="stitle" style="font-size:.85rem;margin-bottom:8px">⏳ Waiting for '+opponent+'…</div>';
+      const card=document.createElement('div'); card.className='battle-card'; card.style.opacity='.85';
+      card.innerHTML=`<div style="display:flex;align-items:center;gap:16px;padding:8px 0;flex-wrap:wrap">
+        <div style="text-align:center">
+          <div style="font-size:2.5rem">${myPick.emoji}</div>
+          <div style="font-size:.6rem;color:${RARITY_COLOR[myPick.rarity]||'var(--muted)'};font-weight:800;text-transform:uppercase">${myPick.rarity}</div>
+          <div style="font-size:.65rem;color:#22c55e">✅ Locked in</div>
+        </div>
+        <div style="font-size:1.6rem;color:var(--muted)">⚔️</div>
+        <div style="text-align:center">
+          <div style="font-size:2.5rem">❓</div>
+          <div style="font-size:.65rem;color:var(--muted)">${opponent} is choosing…</div>
+        </div>
+      </div>`;
+      sec.appendChild(card); container.appendChild(sec);
+    });
+
+    // ── 4. RESULTS ──
+    const allMine=[...Object.entries(inBattles),...Object.entries(outBattles)];
+    const done=allMine.filter(([,b])=>b.status==='done'||b.status==='declined').slice(-8).reverse();
+    if(done.length){
+      const hSec=document.createElement('div');
+      hSec.innerHTML='<div class="stitle" style="font-size:.85rem;margin-bottom:8px;margin-top:12px">🏆 Battle Results</div>';
+      done.forEach(([bid,b])=>{
+        const isFrom=b.from===currentUser;
+        const opponent=isFrom?b.to:b.from;
+        const myPet=isFrom?b.fromPick:b.toPick;
+        const theirPet=isFrom?b.toPick:b.fromPick;
+        const iWon=b.winner===currentUser;
+        const isDraw=b.winner==='draw'||b.winner==='noduel';
+        let resClass='battle-result-draw',resIcon='🤝',resText='Draw — no pets traded';
+        if(b.status==='declined'){
+          resIcon='❌'; resText='Declined';
+        } else if(b.nocontest){
+          resIcon='🛡️'; resText=iWon?'2 steps up — no prize for you':'2 steps below — safe!';
+        } else if(b.backfire){
+          resClass=iWon?'battle-result-win':'battle-result-lose';
+          resIcon=iWon?'😈':'💥';
+          resText=iWon?'They overshot — you stole their pet!':'You overshot — they took your pet!';
+        } else if(!isDraw){
+          resClass=iWon?'battle-result-win':'battle-result-lose';
+          resIcon=iWon?'🏆':'💀';
+          resText=iWon?'You Won!':'You Lost';
+        }
+        const card=document.createElement('div'); card.className='battle-card '+resClass;
+        const diceHtml=b.fromDice?`<div style="font-size:.68rem;color:var(--muted);margin-top:4px">🎲 Dice: You ${isFrom?b.fromDice:b.toDice} — ${opponent} ${isFrom?b.toDice:b.fromDice}</div>`:'';
+        const prizePet=b.prizePetId?PETS.find(p=>p.id===b.prizePetId):null;
+        const prizeHtml=prizePet&&b.status!=='declined'
+          ?`<div style="font-size:.75rem;margin-top:6px;color:${iWon?'#22c55e':'#ff3060'}">${iWon?'🎁 Won: ':'Lost: '}${prizePet.emoji} ${prizePet.name}</div>`:'';
+        card.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-size:1.3rem">${resIcon}</span><strong>${resText}</strong>
+          <span style="color:var(--muted);font-size:.75rem">vs ${opponent}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+          ${myPet?`<div style="text-align:center"><div style="font-size:2rem;${iWon&&!isDraw?'filter:drop-shadow(0 0 6px '+RARITY_COLOR[myPet.rarity]+')':''}">${myPet.emoji}</div><div style="font-size:.58rem;color:${RARITY_COLOR[myPet.rarity]};font-weight:800;text-transform:uppercase">${myPet.rarity}</div><div style="font-size:.6rem;color:var(--muted)">You</div></div>`:''}
+          <div style="color:var(--muted)">vs</div>
+          ${theirPet?`<div style="text-align:center"><div style="font-size:2rem;${!iWon&&!isDraw?'filter:drop-shadow(0 0 6px '+RARITY_COLOR[theirPet.rarity]+')':''}">${theirPet.emoji}</div><div style="font-size:.58rem;color:${RARITY_COLOR[theirPet.rarity]};font-weight:800;text-transform:uppercase">${theirPet.rarity}</div><div style="font-size:.6rem;color:var(--muted)">${opponent}</div></div>`:''}
+        </div>${diceHtml}${prizeHtml}`;
         hSec.appendChild(card);
       });
       container.appendChild(hSec);
     }
 
-    // ── Challenge a player ──
-    const challengeSec = document.createElement('div');
-    const challengeTitle = document.createElement('div');
-    challengeTitle.className='stitle'; challengeTitle.style.cssText='font-size:.85rem;margin-bottom:10px;margin-top:10px';
-    challengeTitle.textContent='⚔️ Challenge a Player';
-    challengeSec.appendChild(challengeTitle);
+    // ── 5. CHALLENGE ONLINE PLAYERS ──
+    const cSec=document.createElement('div');
+    const cTitle=document.createElement('div'); cTitle.className='stitle'; cTitle.style.cssText='font-size:.85rem;margin-bottom:10px;margin-top:14px';
+    cTitle.textContent='⚔️ Challenge Online Players';
+    cSec.appendChild(cTitle);
 
-    if(!allPlayers.length){
-      const note = document.createElement('div');
-      note.style.cssText='color:var(--muted);font-size:.85rem;padding:10px 0';
-      note.textContent='No other players yet. Share the game URL!';
-      challengeSec.appendChild(note);
+    // Only online players (excluding self)
+    const onlineNames=Object.keys(_onlinePlayers).filter(n=>n!==currentUser);
+    if(!onlineNames.length){
+      const note=document.createElement('div'); note.style.cssText='color:var(--muted);font-size:.85rem;padding:8px 0;background:var(--surf);padding:10px 14px;border-radius:10px';
+      note.textContent='No other players online right now. They need to have the game open!';
+      cSec.appendChild(note);
     } else {
-      // Player selector
-      const pList = document.createElement('div');
-      pList.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px';
-      allPlayers.forEach(pl=>{
-        const btn = document.createElement('button');
-        btn.className='btn btn-sm '+(_battleChallengeTo===pl.name?'btn-p':'btn-s');
-        const avEl = isPhoto(pl.avatar)?`<img src="${pl.avatar}" style="width:20px;height:20px;border-radius:50%;object-fit:cover;vertical-align:middle">`:`${pl.avatar||'🐾'}`;
-        btn.innerHTML = avEl+' '+pl.name;
-        btn.onclick=()=>{ _battleChallengeTo=pl.name; _battlePickPetId=null; renderBattle(); };
+      const rules=document.createElement('div'); rules.style.cssText='font-size:.75rem;color:var(--muted);margin-bottom:12px;background:var(--surf);padding:8px 12px;border-radius:10px;border:1px solid var(--bord);line-height:1.6';
+      rules.innerHTML='🏆 +1 step = WIN their pet &nbsp;•&nbsp; 🎲 Same = dice roll &nbsp;•&nbsp; 🛡️ +2 steps = no prize &nbsp;•&nbsp; 💥 ±3 or more = CHALLENGER loses their pet!';
+      cSec.appendChild(rules);
+      const pList=document.createElement('div'); pList.style.cssText='display:flex;flex-wrap:wrap;gap:8px';
+      onlineNames.forEach(name=>{
+        const alreadySent=Object.values(outBattles).some(b=>b.to===name&&(b.status==='pending'||b.status==='picking'));
+        const prof=profiles.find(p=>p.name===name)||{};
+        const btn=document.createElement('button');
+        btn.className='btn btn-sm btn-s'; btn.disabled=alreadySent;
+        const avEl=isPhoto(prof.avatar)?`<img src="${prof.avatar}" style="width:20px;height:20px;border-radius:50%;object-fit:cover;vertical-align:middle">`:`${prof.avatar||'🐾'}`;
+        btn.innerHTML=`<span style="color:#22c55e;font-size:.6rem">●</span> ${avEl} ${name}${alreadySent?' ⏳':''}`;
+        btn.onclick=()=>sendBattleChallenge(name);
         pList.appendChild(btn);
       });
-      challengeSec.appendChild(pList);
-
-      if(_battleChallengeTo){
-        const myPets2 = PETS.filter(p=>(save?.pets?.[p.id]||0)>0);
-        if(!myPets2.length){
-          const noP = document.createElement('div');
-          noP.style.cssText='color:var(--muted);font-size:.82rem;padding:8px 0';
-          noP.textContent='You need pets to battle!';
-          challengeSec.appendChild(noP);
-        } else {
-          const pickL = document.createElement('div');
-          pickL.style.cssText='font-size:.78rem;color:var(--muted);margin-bottom:8px';
-          pickL.textContent='Pick your fighter:';
-          challengeSec.appendChild(pickL);
-          const grid2 = document.createElement('div');
-          grid2.className='battle-pick-grid';
-          myPets2.forEach(p=>{
-            const sp = document.createElement('div');
-            sp.className='battle-pick-pet'+(_battlePickPetId===p.id?' sel':'');
-            sp.style.borderColor=_battlePickPetId===p.id?(RARITY_COLOR[p.rarity]||'var(--gold)'):'var(--bord)';
-            sp.title=p.name+' ('+p.rarity+') — you have '+(save.pets[p.id]||0);
-            sp.innerHTML=`<div>${p.emoji}</div><div style="font-size:.55rem;color:${RARITY_COLOR[p.rarity]||'var(--muted)'};font-weight:800;text-transform:uppercase">${p.rarity[0].toUpperCase()}</div>`;
-            sp.onclick=()=>{ _battlePickPetId=p.id; renderBattle(); };
-            grid2.appendChild(sp);
-          });
-          challengeSec.appendChild(grid2);
-
-          const challengeBtn = document.createElement('button');
-          challengeBtn.className='btn btn-p btn-sm';
-          challengeBtn.style.marginTop='12px';
-          challengeBtn.disabled=!_battlePickPetId;
-          challengeBtn.textContent='⚔️ Send Challenge!';
-          challengeBtn.onclick=()=>{
-            if(!_battlePickPetId){ toast('Pick a pet first!'); return; }
-            sendBattleChallenge(_battleChallengeTo, _battlePickPetId);
-          };
-          challengeSec.appendChild(challengeBtn);
-        }
-      }
+      cSec.appendChild(pList);
     }
-    container.appendChild(challengeSec);
+    container.appendChild(cSec);
   });
 }
 
-function sendBattleChallenge(toUser, petId){
-  const pet = PETS.find(p=>p.id===petId);
-  if(!pet){ toast('Pet not found'); return; }
-  const battle = {
-    from: currentUser,
-    to: toUser,
-    fromPet: {id:petId, emoji:pet.emoji, name:pet.name, rarity:pet.rarity},
-    status: 'pending',
-    ts: Date.now()
-  };
+function sendBattleChallenge(toUser){
+  if(!_onlinePlayers[toUser]){ toast(toUser+' is no longer online.'); renderBattle(); return; }
+  const battle={from:currentUser,to:toUser,status:'pending',ts:Date.now()};
   db.ref('battles').push(battle).then(()=>{
     toast('⚔️ Challenge sent to '+toUser+'!');
-    _battleChallengeTo=null; _battlePickPetId=null;
     renderBattle();
   });
 }
 
-function acceptBattle(battleId, battle, myPetId){
-  const myPet = PETS.find(p=>p.id===myPetId);
-  if(!myPet){ toast('Pet not found'); return; }
-  if(!(save?.pets?.[myPetId]>0)){ toast("You don't have that pet!"); return; }
+function acceptBattleChallenge(battleId){
+  db.ref('battles/'+battleId+'/status').set('picking').then(()=>{
+    toast('Challenge accepted! Pick your pet!');
+    renderBattle();
+  });
+}
 
-  // Determine winner by rarity rank
-  const rank = RAR_ORDER;
-  const myRank = rank.indexOf(myPet.rarity);
-  const theirRank = rank.indexOf(battle.fromPet.rarity);
-  let winner, loser, winnerPet, loserPetId;
-
-  if(myRank > theirRank){
-    winner=currentUser; loser=battle.from;
-    winnerPet=myPet; loserPetId=battle.fromPet.id;
-  } else if(theirRank > myRank){
-    winner=battle.from; loser=currentUser;
-    winnerPet=battle.fromPet; loserPetId=myPetId;
-  } else {
-    // Draw — no pets exchanged
-    const updates={};
-    updates['battles/'+battleId+'/toPet']={id:myPetId,emoji:myPet.emoji,name:myPet.name,rarity:myPet.rarity};
-    updates['battles/'+battleId+'/winner']='draw';
-    updates['battles/'+battleId+'/status']='done';
-    db.ref().update(updates).then(()=>{
-      toast('🤝 It\'s a draw! No pets exchanged.');
-      snd('tab');
-      renderBattle();
+function submitBattlePick(battleId, battle, petId){
+  const pet=PETS.find(p=>p.id===petId);
+  if(!pet){ toast('Pet not found!'); return; }
+  if(!(save?.pets?.[petId]>0)){ toast("You don't have that pet!"); return; }
+  const isFrom=battle.from===currentUser;
+  const field=isFrom?'fromPick':'toPick';
+  db.ref('battles/'+battleId+'/'+field).set({id:petId,emoji:pet.emoji,name:pet.name,rarity:pet.rarity}).then(()=>{
+    toast('🔒 Locked in! Waiting for opponent…');
+    // Check if opponent already picked → resolve
+    db.ref('battles/'+battleId).once('value',snap=>{
+      const b=snap.val();
+      if(b&&b.fromPick&&b.toPick&&b.status==='picking') tryResolveBattle(battleId,b);
+      else renderBattle();
     });
-    return;
-  }
+  });
+}
 
-  // Transfer loser's pet to winner
-  db.ref('players/'+battle.from+'/save/pets').once('value', snap=>{
-    const theirPets = snap.val()||{};
-    // Verify both still have their pets
-    if(winner===battle.from && !(theirPets[battle.fromPet.id]>0)){
-      toast('Challenger no longer has that pet!');
-      db.ref('battles/'+battleId+'/status').set('declined'); renderBattle(); return;
-    }
-    if(winner===currentUser && !(save?.pets?.[myPetId]>0)){
-      toast("You no longer have that pet!"); renderBattle(); return;
-    }
-
-    const updates={};
-    // Update pets
-    if(winner===currentUser){
-      // I win — I get their pet, they lose it
-      save.pets[loserPetId]=(save.pets[loserPetId]||0)+1;
-      updates['players/'+currentUser+'/save/pets/'+loserPetId]=(save.pets[loserPetId]);
-      updates['players/'+battle.from+'/save/pets/'+loserPetId]=Math.max(0,(theirPets[loserPetId]||0)-1);
+function tryResolveBattle(battleId, battle){
+  // Use a Firebase transaction so only ONE client resolves (prevents double transfer)
+  db.ref('battles/'+battleId).transaction(b=>{
+    if(!b||b.status!=='picking'||!b.fromPick||!b.toPick) return; // abort
+    const rank=RAR_ORDER;
+    const fR=rank.indexOf(b.fromPick.rarity);
+    const tR=rank.indexOf(b.toPick.rarity);
+    const diff=fR-tR; // positive = from is higher
+    const absDiff=Math.abs(diff);
+    let winner,prizePetId;
+    if(absDiff===1){
+      // ✅ Exactly 1 step higher → WIN, take their pet
+      winner=diff>0?b.from:b.to;
+      prizePetId=diff>0?b.toPick.id:b.fromPick.id;
+    } else if(diff===0){
+      // 🎲 Same rarity → dice roll, winner takes pet
+      const fD=_bDice(battleId,'from'), tD=_bDice(battleId,'to');
+      b.fromDice=fD; b.toDice=tD;
+      if(fD>tD){      winner=b.from; prizePetId=b.toPick.id; }
+      else if(tD>fD){ winner=b.to;   prizePetId=b.fromPick.id; }
+      else {          winner='draw';  prizePetId=null; }
+    } else if(absDiff===2){
+      // 🤝 2 steps apart → no contest, no pets change hands
+      winner=diff>0?b.from:b.to; // technical win, no prize
+      prizePetId=null;
+      b.nocontest=true;
     } else {
-      // They win — they get my pet, I lose it
-      save.pets[loserPetId]=Math.max(0,(save.pets[loserPetId]||0)-1);
-      updates['players/'+currentUser+'/save/pets/'+loserPetId]=save.pets[loserPetId];
-      updates['players/'+battle.from+'/save/pets/'+loserPetId]=(theirPets[loserPetId]||0)+1;
+      // 💥 3+ steps apart → CHALLENGER (b.from) always loses their pet
+      // Doesn't matter if they went too high OR too low — challenger carries all risk
+      winner=b.to;
+      prizePetId=b.fromPick.id;
+      b.backfire=true;
     }
-    // Record result
-    updates['battles/'+battleId+'/toPet']={id:myPetId,emoji:myPet.emoji,name:myPet.name,rarity:myPet.rarity};
-    updates['battles/'+battleId+'/winner']=winner;
-    updates['battles/'+battleId+'/prizePet']=PETS.find(p=>p.id===loserPetId)?.emoji||'🐾';
-    updates['battles/'+battleId+'/prizeRarity']=PETS.find(p=>p.id===loserPetId)?.rarity||'common';
-    updates['battles/'+battleId+'/status']='done';
-
-    db.ref().update(updates).then(()=>{
-      writeSave(); localStorage.setItem('ev2_save_'+currentUser,JSON.stringify(save));
-      if(winner===currentUser){
-        toast('🏆 You won! Got '+PETS.find(p=>p.id===loserPetId)?.emoji+' from '+loser+'!');
-        snd('hatch');
-      } else {
-        toast('💀 You lost '+PETS.find(p=>p.id===loserPetId)?.emoji+' to '+winner+'!');
-        snd('tab');
-      }
-      renderBattle(); renderCollection();
+    b.winner=winner; b.prizePetId=prizePetId; b.status='done';
+    return b;
+  },(err,committed,snap)=>{
+    if(err||!committed) return;
+    const b=snap.val();
+    renderBattle();
+    // No transfer if draw or no prize (nocontest / dice draw)
+    if(!b.prizePetId||b.winner==='draw') return;
+    const loser=b.winner===b.from?b.to:b.from;
+    db.ref('players/'+loser+'/save/pets').once('value',ls=>{
+      const lp=ls.val()||{};
+      if(!(lp[b.prizePetId]>0)) return;
+      db.ref('players/'+b.winner+'/save/pets').once('value',ws=>{
+        const wp=ws.val()||{};
+        const updates={};
+        updates['players/'+b.winner+'/save/pets/'+b.prizePetId]=(wp[b.prizePetId]||0)+1;
+        updates['players/'+loser+'/save/pets/'+b.prizePetId]=Math.max(0,(lp[b.prizePetId]||0)-1);
+        db.ref().update(updates).then(()=>{
+          if(b.winner===currentUser||loser===currentUser){
+            db.ref('players/'+currentUser+'/save').once('value',ss=>{
+              if(ss.val()){save=ss.val();writeSave();localStorage.setItem('ev2_save_'+currentUser,JSON.stringify(save));}
+              renderCollection();
+            });
+          }
+        });
+      });
     });
   });
 }
 
 function declineBattle(battleId){
-  db.ref('battles/'+battleId+'/status').set('declined').then(()=>{
-    toast('Battle declined.'); renderBattle();
-  });
+  db.ref('battles/'+battleId+'/status').set('declined').then(()=>{ toast('Battle declined.'); renderBattle(); });
 }
 
 function cancelBattle(battleId){
-  db.ref('battles/'+battleId+'/status').set('declined').then(()=>{
-    toast('Challenge cancelled.'); renderBattle();
-  });
+  db.ref('battles/'+battleId+'/status').set('declined').then(()=>{ toast('Challenge cancelled.'); renderBattle(); });
 }
 
 // ══════════════════════════════════════════════
