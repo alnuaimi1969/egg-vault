@@ -3925,72 +3925,97 @@ function renderVaultAdminPanel(container){
     // ── Mode B: set per-rarity totals, distribute within rarity by initCount ──
     const note = document.createElement('div');
     note.className = 'ap-note';
-    note.textContent = 'Set a total for each rarity. The amount is then split among individual pets in that rarity proportionally to their original counts. You can enter a number OR a percentage of the current vault total.';
+    note.textContent = 'Type how many pets for each rarity. The Grand Total updates live as you type. Hit Apply when done.';
     panel.appendChild(note);
 
-    // Toggle: number vs %
-    const unitBar = document.createElement('div');
-    unitBar.className = 'ap-tab-bar';
-    const unitN = document.createElement('div'); unitN.className='ap-tab on'; unitN.textContent='# Count'; unitN.dataset.u='n';
-    const unitP = document.createElement('div'); unitP.className='ap-tab'; unitP.textContent='% of Total'; unitP.dataset.u='p';
-    let _unit='n'; // 'n' = number, 'p' = percent
-    const grandTotalHint = document.createElement('div');
-    grandTotalHint.style.cssText='font-size:.7rem;color:var(--muted);margin-top:4px;width:100%';
-    const curTotal = poolTotal();
-    grandTotalHint.textContent = 'Current vault total: '+curTotal.toLocaleString()+' pets';
-
-    unitN.onclick=()=>{ _unit='n'; unitN.classList.add('on'); unitP.classList.remove('on'); };
-    unitP.onclick=()=>{ _unit='p'; unitP.classList.add('on'); unitN.classList.remove('on'); };
-    unitBar.appendChild(unitN); unitBar.appendChild(unitP);
-    panel.appendChild(unitBar);
-    panel.appendChild(grandTotalHint);
-
-    const rarGrid = document.createElement('div');
-    rarGrid.className = 'ap-rarity-grid';
     const inputs = {};
+    const pctLabels = {};
+
+    // Grand total bar
+    const totalBox = document.createElement('div');
+    totalBox.style.cssText='background:var(--surf2);border:2px solid var(--bord);border-radius:12px;padding:10px 14px;margin:8px 0;display:flex;align-items:center;justify-content:space-between;gap:8px';
+    const totalLabel = document.createElement('div');
+    totalLabel.style.cssText='font-size:.75rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em';
+    totalLabel.textContent='Grand Total';
+    const totalNum = document.createElement('div');
+    totalNum.style.cssText='font-size:1.35rem;font-weight:900;color:var(--txt);font-variant-numeric:tabular-nums';
+    panel.appendChild(totalBox);
+    totalBox.appendChild(totalLabel);
+    totalBox.appendChild(totalNum);
+
+    function recalcTotal(){
+      let sum=0;
+      Object.entries(inputs).forEach(([rar,inp3])=>{ sum+=parseInt(inp3.value,10)||0; });
+      totalNum.textContent = sum.toLocaleString()+' pets';
+      // update all % labels
+      Object.entries(inputs).forEach(([rar,inp3])=>{
+        const v=parseInt(inp3.value,10)||0;
+        const pct = sum>0 ? (v/sum*100).toFixed(1)+'%' : '0%';
+        if(pctLabels[rar]) pctLabels[rar].textContent = pct;
+      });
+      // color total box border by how full it is
+      const cap = PETS.reduce((s,p)=>s+(poolCapacity[p.id]||p.initCount),0);
+      const fill = cap>0 ? sum/cap : 0;
+      const bColor = fill>1.05 ? '#ff4444' : fill>0.9 ? '#ffaa00' : '#22cc77';
+      totalBox.style.borderColor = bColor;
+      totalNum.style.color = bColor;
+    }
+
+    const rarList = document.createElement('div');
+    rarList.style.cssText='display:flex;flex-direction:column;gap:6px;margin:4px 0';
     [...RAR_ORDER].reverse().forEach(rar=>{
-      const rarPets = PETS.filter(p=>p.rarity===rar);
+      const rarPets = PETS.filter(p=>getEffectiveRarity(p.id)===rar);
       if(!rarPets.length) return;
       const rarCurrent = rarPets.reduce((s,p)=>s+poolCount(p.id),0);
       const col = RARITY_COLOR[rar]||'var(--muted)';
-      const row2 = document.createElement('div'); row2.className='ap-rar-row';
-      row2.style.borderColor=col+'44';
-      const lbl2=document.createElement('div'); lbl2.className='ap-rar-label'; lbl2.style.color=col; lbl2.textContent=rar+' ('+rarPets.length+')';
-      const inp2=document.createElement('input'); inp2.type='number'; inp2.min='0'; inp2.className='ap-rar-inp'; inp2.value=rarCurrent;
-      const pctLbl=document.createElement('div'); pctLbl.className='ap-rar-pct';
-      const updatePct=()=>{ const v=parseFloat(inp2.value)||0; pctLbl.textContent=(_unit==='p'?(v).toFixed(1)+'%':rarPets.length+' pets'); };
-      inp2.oninput=updatePct; updatePct();
-      inputs[rar]=inp2;
-      row2.appendChild(lbl2); row2.appendChild(inp2); row2.appendChild(pctLbl);
-      rarGrid.appendChild(row2);
-    });
-    panel.appendChild(rarGrid);
 
-    // Total preview
-    const totalPreview = document.createElement('div');
-    totalPreview.className='ap-note';
+      const row2 = document.createElement('div');
+      row2.style.cssText='display:flex;align-items:center;gap:10px;background:var(--surf2);border:1.5px solid '+col+'44;border-radius:10px;padding:8px 12px';
+
+      // Color dot + label
+      const dot = document.createElement('div');
+      dot.style.cssText='width:10px;height:10px;border-radius:50%;background:'+col+';flex-shrink:0';
+      const lbl2 = document.createElement('div');
+      lbl2.style.cssText='font-size:.8rem;font-weight:700;color:'+col+';text-transform:capitalize;min-width:80px';
+      lbl2.textContent = rar+' ('+rarPets.length+')';
+
+      // Big input
+      const inp2 = document.createElement('input');
+      inp2.type='number'; inp2.min='0'; inp2.className='ap-rar-inp';
+      inp2.style.cssText='width:90px;font-size:1rem;font-weight:700;text-align:center;padding:5px 8px';
+      inp2.value = rarCurrent;
+
+      // Live % label
+      const pctLbl = document.createElement('div');
+      pctLbl.style.cssText='font-size:.72rem;color:var(--muted);min-width:42px;text-align:right;font-variant-numeric:tabular-nums';
+
+      inputs[rar] = inp2;
+      pctLabels[rar] = pctLbl;
+      inp2.oninput = recalcTotal;
+
+      row2.appendChild(dot); row2.appendChild(lbl2); row2.appendChild(inp2); row2.appendChild(pctLbl);
+      rarList.appendChild(row2);
+    });
+    panel.appendChild(rarList);
+
+    recalcTotal(); // initial render
 
     const applyBtn2 = document.createElement('button');
-    applyBtn2.className='ap-apply'; applyBtn2.textContent='⚡ Apply Per Rarity';
+    applyBtn2.className='ap-apply'; applyBtn2.style.marginTop='6px'; applyBtn2.textContent='⚡ Apply Per Rarity';
     applyBtn2.onclick=()=>{
       let grandApplied=0;
       Object.entries(inputs).forEach(([rar,inp3])=>{
-        const rawVal = parseFloat(inp3.value);
-        if(isNaN(rawVal)||rawVal<0) return;
-        const rarPets = PETS.filter(p=>p.rarity===rar);
+        const rarTotal = parseInt(inp3.value,10)||0;
+        const rarPets = PETS.filter(p=>getEffectiveRarity(p.id)===rar);
         const rarOrig = rarPets.reduce((s,p)=>s+p.initCount,0);
-        let rarTotal;
-        if(_unit==='p'){
-          const vaultNow = poolTotal();
-          rarTotal = Math.round(rawVal/100 * vaultNow);
-        } else {
-          rarTotal = Math.round(rawVal);
-        }
         rarPets.forEach(p=>{
           pool[p.id] = rarOrig>0 ? Math.round(rarTotal * p.initCount / rarOrig) : 0;
+          poolCapacity[p.id] = Math.max(poolCapacity[p.id]||0, pool[p.id]);
         });
         grandApplied += rarTotal;
       });
+      localStorage.setItem('ev2_pool_cap', JSON.stringify(poolCapacity));
+      db.ref('poolCapacity').set(poolCapacity);
       savePool(); updateVaultDisplay(0); renderVault();
       toast('✔ Per-rarity totals applied — '+grandApplied.toLocaleString()+' total');
     };
