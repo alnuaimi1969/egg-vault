@@ -3975,6 +3975,7 @@ function adminSetCount(petId, newVal){
 
 // ── Admin bulk panel ──────────────────────────────────────────
 let _apMode = 'proportional'; // 'proportional' | 'per-rarity'
+let _expandedToolId = null;  // which tool card is open in edit mode
 function renderVaultAdminPanel(container){
   const panel = document.createElement('div');
   panel.id = 'vaultAdminPanel';
@@ -4361,8 +4362,6 @@ function renderVaultAdminPanel(container){
     secHd.style.cssText='font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:8px 0 6px';
     secHd.textContent='All Tools';
     panel.appendChild(secHd);
-
-    let _expandedToolId = null;
 
     function buildToolCard(tool){
       const isCustom = tool.id.startsWith('custom_');
