@@ -377,11 +377,29 @@ nav button:hover:not(.on){color:var(--txt)}
     <div style="font-size:.75rem;color:var(--muted);text-align:center">— or pick an emoji —</div>
     <div class="avpick" id="epAvPick"></div>
     <input id="epNameInput" type="text" placeholder="Name…" maxlength="16" style="background:var(--surf);border:1px solid var(--bord);color:var(--txt);padding:10px 14px;border-radius:10px;font-size:1rem;width:100%;box-sizing:border-box;outline:none">
+    <div style="font-size:.75rem;color:var(--muted)">🔒 PIN (4 digits — leave blank for no lock)</div>
+    <input id="epPinInput" type="password" inputmode="numeric" maxlength="4" placeholder="Set PIN…" style="background:var(--surf);border:1px solid var(--bord);color:var(--txt);padding:10px 14px;border-radius:10px;font-size:1.2rem;letter-spacing:6px;width:100%;box-sizing:border-box;outline:none">
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-p" style="flex:1" onclick="saveEditProfile()">Save</button>
       <button class="btn btn-s" style="flex:1" onclick="closeEditProfile()">Cancel</button>
     </div>
     <button class="btn btn-s" style="color:#ff3060;border-color:#ff306055;font-size:.8rem" onclick="deleteProfile()">🗑 Delete Profile</button>
+  </div>
+</div>
+
+<!-- PIN OVERLAY -->
+<div id="pinOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:3000;display:none;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--surf2);border:2px solid var(--bord);border-radius:18px;padding:28px;max-width:320px;width:100%;display:flex;flex-direction:column;gap:14px;align-items:center">
+    <div id="pinAvatar" style="font-size:3rem"></div>
+    <div id="pinName" style="font-weight:700;font-size:1.1rem"></div>
+    <div style="font-size:.85rem;color:var(--muted)">Enter your PIN to continue</div>
+    <input id="pinInput" type="password" inputmode="numeric" maxlength="4" placeholder="••••"
+      style="background:var(--surf);border:2px solid var(--bord);color:var(--txt);padding:12px;border-radius:10px;font-size:1.8rem;letter-spacing:10px;width:100%;text-align:center;outline:none;box-sizing:border-box">
+    <div id="pinError" style="color:#ff3060;font-size:.82rem;display:none">Wrong PIN — try again</div>
+    <div style="display:flex;gap:8px;width:100%">
+      <button class="btn btn-p" style="flex:1" onclick="submitPin()">Enter</button>
+      <button class="btn btn-s" style="flex:1" onclick="cancelPin()">Cancel</button>
+    </div>
   </div>
 </div>
 
@@ -883,6 +901,7 @@ function openEditProfile(p){
   _editTarget=p; _editAv=p.avatar;
   document.getElementById('editProfileOverlay').style.display='flex';
   document.getElementById('epNameInput').value=p.name;
+  document.getElementById('epPinInput').value=p.pin||'';
   const prev=document.getElementById('epAvatarPreview');
   function updatePrev(av){
     if(isPhoto(av)){ prev.innerHTML='<img src="'+av+'" style="width:80px;height:80px;border-radius:50%;object-fit:cover">'; prev.style.fontSize=''; }
@@ -927,6 +946,8 @@ function saveEditProfile(){
   }
   _editTarget.name=newName;
   _editTarget.avatar=_editAv||_editTarget.avatar;
+  const newPin=document.getElementById('epPinInput').value.trim();
+  _editTarget.pin=newPin||null;
   db.ref('players/'+newName+'/profile').set({avatar:_editTarget.avatar,lastSeen:Date.now()});
   saveProfiles();
   closeEditProfile();
@@ -944,7 +965,45 @@ function deleteProfile(){
   closeEditProfile();
   renderProfileScreen();
 }
+let _pendingProfile=null;
 function selectProfile(p){
+  if(p.pin){
+    // Show PIN overlay
+    _pendingProfile=p;
+    const av=document.getElementById('pinAvatar');
+    const nm=document.getElementById('pinName');
+    if(isPhoto(p.avatar)) av.innerHTML='<img src="'+p.avatar+'" style="width:64px;height:64px;border-radius:50%;object-fit:cover">';
+    else av.textContent=p.avatar||'🐾';
+    nm.textContent=p.name;
+    document.getElementById('pinInput').value='';
+    document.getElementById('pinError').style.display='none';
+    document.getElementById('pinOverlay').style.display='flex';
+    setTimeout(()=>document.getElementById('pinInput').focus(),100);
+    return;
+  }
+  enterProfile(p);
+}
+function submitPin(){
+  const entered=document.getElementById('pinInput').value;
+  if(entered===String(_pendingProfile.pin)){
+    document.getElementById('pinOverlay').style.display='none';
+    enterProfile(_pendingProfile);
+    _pendingProfile=null;
+  } else {
+    document.getElementById('pinError').style.display='block';
+    document.getElementById('pinInput').value='';
+    document.getElementById('pinInput').focus();
+  }
+}
+function cancelPin(){
+  document.getElementById('pinOverlay').style.display='none';
+  _pendingProfile=null;
+}
+// Allow pressing Enter on PIN input
+document.addEventListener('DOMContentLoaded',()=>{
+  document.getElementById('pinInput').addEventListener('keydown',e=>{ if(e.key==='Enter') submitPin(); });
+});
+function enterProfile(p){
   snd('profile');
   currentUser=p.name;
   // Load from local cache immediately so UI is instant
