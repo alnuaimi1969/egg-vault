@@ -50,10 +50,10 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 .pcard .peditbtn{position:absolute;top:6px;right:6px;font-size:.75rem;background:var(--surf);border:1px solid var(--bord);border-radius:7px;padding:3px 6px;opacity:0;transition:opacity .15s;z-index:2;cursor:pointer;color:var(--muted)}
 .pcard:hover .peditbtn{opacity:1}
 #newProfileForm{background:var(--surf2);border:2px solid var(--bord);border-radius:14px;
-  padding:22px;display:flex;flex-direction:column;gap:10px;max-width:360px;width:100%;display:none}
-#newProfileForm h2{color:var(--acc2);font-size:1.1rem}
-.avpick{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-height:160px;overflow-y:auto}
-.avpick span{font-size:1.7rem;cursor:pointer;padding:4px;border-radius:8px;border:2px solid transparent;transition:.15s;flex-shrink:0}
+  padding:16px;display:flex;flex-direction:column;gap:8px;max-width:420px;width:100%;display:none}
+#newProfileForm h2{color:var(--acc2);font-size:1rem;margin:0}
+.avpick{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-start;max-height:80px;overflow-y:auto}
+.avpick span{font-size:1.5rem;cursor:pointer;padding:3px;border-radius:7px;border:2px solid transparent;transition:.15s;flex-shrink:0}
 .avpick span:hover,.avpick span.sel{border-color:var(--acc2)}
 .avphoto{width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid var(--acc2)}
 .upload-av-btn{background:var(--surf);border:2px dashed var(--bord);color:var(--muted);border-radius:10px;padding:8px 14px;cursor:pointer;font-size:.82rem;text-align:center;transition:.15s;width:100%}
@@ -353,17 +353,20 @@ nav button:hover:not(.on){color:var(--txt)}
   <button class="btn btn-s btn-sm" onclick="showLeaderboard()" style="gap:6px">🏆 Leaderboard</button>
   <div class="pgrid" id="profileGrid"></div>
   <div id="newProfileForm">
-    <h2>New Profile</h2>
-    <div id="newAvPreview" style="align-self:center;font-size:3rem;width:64px;height:64px;border-radius:50%;background:var(--surf);border:2px solid var(--bord);display:flex;align-items:center;justify-content:center;overflow:hidden"></div>
-    <label class="upload-av-btn" for="newPhotoInput">📷 Upload a photo from device</label>
-    <input type="file" id="newPhotoInput" accept="image/*" style="display:none">
-    <div style="font-size:.75rem;color:var(--muted);text-align:center">— or pick an emoji —</div>
-    <div class="avpick" id="avPick"></div>
-    <input id="pNameInput" type="text" placeholder="Your name…" maxlength="16">
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-p" onclick="createProfile()">Create</button>
-      <button class="btn btn-s" onclick="hideNewForm()">Cancel</button>
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h2>New Profile</h2>
+      <button class="btn btn-s btn-sm" onclick="hideNewForm()">✕</button>
     </div>
+    <div style="display:flex;gap:12px;align-items:flex-start">
+      <div id="newAvPreview" style="flex-shrink:0;font-size:2.2rem;width:52px;height:52px;border-radius:50%;background:var(--surf);border:2px solid var(--acc2);display:flex;align-items:center;justify-content:center;overflow:hidden"></div>
+      <div style="flex:1;display:flex;flex-direction:column;gap:6px;min-width:0">
+        <label class="upload-av-btn" for="newPhotoInput" style="padding:5px 10px;font-size:.75rem">📷 Upload photo</label>
+        <input type="file" id="newPhotoInput" accept="image/*" style="display:none">
+        <div class="avpick" id="avPick"></div>
+      </div>
+    </div>
+    <input id="pNameInput" type="text" placeholder="Your name…" maxlength="16">
+    <button class="btn btn-p" style="width:100%" onclick="createProfile()">✔ Create Profile</button>
   </div>
 </div>
 
