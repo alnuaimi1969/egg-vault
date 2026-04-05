@@ -700,6 +700,7 @@ let pool = {};         // global pool { petId: count }
 let rarityOverrides = {}; // admin overrides { petId: 'newRarity' }
 let poolCapacity = {};    // admin-set maximums { petId: count }
 let reservePool = 0;      // unassigned pet stock admin can distribute any time
+let customPets = [];      // admin-created pets, merged into PETS on load
 let pendingEgg = null; // EGGS entry or null
 let collFilter = 'all';
 let activeNpc = null;
@@ -801,6 +802,70 @@ function saveReservePool(){
   localStorage.setItem('ev2_reserve', String(reservePool));
   db.ref('reserve').set(reservePool);
 }
+
+// ── Custom pets (admin-created) ─────────────────────────────────
+function _mergeCustomPetIntoPETS(cp){
+  if(!PETS.find(p=>p.id===cp.id)) PETS.push(cp);
+}
+function loadCustomPets(){
+  try{ customPets = JSON.parse(localStorage.getItem('ev2_custom_pets')||'[]'); }catch(e){ customPets=[]; }
+  customPets.forEach(cp=>{
+    _mergeCustomPetIntoPETS(cp);
+    if(pool[cp.id]==null) pool[cp.id]=cp.initCount;
+    if(!poolCapacity[cp.id]) poolCapacity[cp.id]=cp.initCount;
+  });
+  db.ref('customPets').once('value',snap=>{
+    const val=snap.val();
+    if(val && Array.isArray(val)){
+      val.forEach(cp=>{
+        if(!customPets.find(x=>x.id===cp.id)){
+          customPets.push(cp);
+          _mergeCustomPetIntoPETS(cp);
+          if(pool[cp.id]==null) pool[cp.id]=cp.initCount;
+          if(!poolCapacity[cp.id]) poolCapacity[cp.id]=cp.initCount;
+        }
+      });
+      localStorage.setItem('ev2_custom_pets',JSON.stringify(customPets));
+    }
+  });
+}
+function saveCustomPets(){
+  localStorage.setItem('ev2_custom_pets',JSON.stringify(customPets));
+  db.ref('customPets').set(customPets);
+}
+function adminAddCustomPet(name, emoji, rarity, count){
+  const id = 'custom_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+  const cp = {id, name, emoji, rarity, initCount:count, _custom:true};
+  customPets.push(cp);
+  _mergeCustomPetIntoPETS(cp);
+  pool[id] = count;
+  poolCapacity[id] = count;
+  saveCustomPets();
+  savePool();
+  localStorage.setItem('ev2_pool_cap', JSON.stringify(poolCapacity));
+  db.ref('poolCapacity').set(poolCapacity);
+  updateVaultDisplay(0);
+  renderVault();
+  toast('✔ Added '+count+' × '+emoji+' '+name+' to '+rarity);
+}
+function adminDeleteCustomPet(id){
+  const cp = customPets.find(p=>p.id===id);
+  if(!cp) return;
+  const owned = pool[id]||0;
+  if(!confirm('Delete "'+cp.name+'"? Its '+owned+' vault copies will be removed.')) return;
+  customPets = customPets.filter(p=>p.id!==id);
+  const idx = PETS.findIndex(p=>p.id===id);
+  if(idx>-1) PETS.splice(idx,1);
+  delete pool[id]; delete poolCapacity[id];
+  saveCustomPets();
+  savePool();
+  localStorage.setItem('ev2_pool_cap', JSON.stringify(poolCapacity));
+  db.ref('poolCapacity').set(poolCapacity);
+  updateVaultDisplay(0);
+  renderVault();
+  toast('Removed '+cp.emoji+' '+cp.name);
+}
+
 function adminSetRarity(petId, newRarity){
   const orig = PETS.find(p=>p.id===petId)?.rarity;
   if(newRarity===orig) delete rarityOverrides[petId];
@@ -1180,6 +1245,7 @@ function initApp(){
   loadPool();
   loadRarityOverrides();
   loadReservePool();
+  loadCustomPets();
   updateCoins();
   updateVaultDisplay(0);
   renderHatch();
@@ -3911,15 +3977,21 @@ function renderVaultAdminPanel(container){
   // Mode tabs
   const tabBar = document.createElement('div');
   tabBar.className = 'ap-tab-bar';
+  tabBar.style.flexWrap='wrap';
   const tabProp = document.createElement('div');
   tabProp.className = 'ap-tab'+(_apMode==='proportional'?' on':'');
   tabProp.textContent = '⚖️ By Proportion';
   const tabRar = document.createElement('div');
   tabRar.className = 'ap-tab'+(_apMode==='per-rarity'?' on':'');
   tabRar.textContent = '🎚️ Per Rarity';
+  const tabNew = document.createElement('div');
+  tabNew.className = 'ap-tab'+(_apMode==='new-pet'?' on':'');
+  tabNew.style.color = _apMode==='new-pet'?'#fff':'#aaffaa';
+  tabNew.textContent = '🐾 New Pet';
   tabProp.onclick = ()=>{ _apMode='proportional'; renderVault(); };
   tabRar.onclick  = ()=>{ _apMode='per-rarity';   renderVault(); };
-  tabBar.appendChild(tabProp); tabBar.appendChild(tabRar);
+  tabNew.onclick  = ()=>{ _apMode='new-pet';       renderVault(); };
+  tabBar.appendChild(tabProp); tabBar.appendChild(tabRar); tabBar.appendChild(tabNew);
   panel.appendChild(tabBar);
 
   if(_apMode === 'proportional'){
@@ -4090,6 +4162,121 @@ function renderVaultAdminPanel(container){
       toast('✔ Per-rarity totals applied — '+grandApplied.toLocaleString()+' total');
     };
     panel.appendChild(applyBtn2);
+
+  } else if(_apMode === 'new-pet'){
+    // ── Mode C: Create a new custom pet ──────────────────────────
+    const note3 = document.createElement('div');
+    note3.className='ap-note';
+    note3.textContent='Create a brand-new pet and add it to any rarity. It will appear in the vault immediately and players can hatch it.';
+    panel.appendChild(note3);
+
+    // Form
+    const form = document.createElement('div');
+    form.style.cssText='display:flex;flex-direction:column;gap:10px;margin-top:4px';
+
+    // Emoji + Name row
+    const row1 = document.createElement('div');
+    row1.style.cssText='display:flex;gap:8px;align-items:center';
+    const emojiInp = document.createElement('input');
+    emojiInp.type='text'; emojiInp.maxLength=2; emojiInp.placeholder='🐉';
+    emojiInp.style.cssText='width:54px;font-size:1.6rem;text-align:center;background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:10px;padding:6px;outline:none';
+    const nameInp = document.createElement('input');
+    nameInp.type='text'; nameInp.placeholder='Pet name (e.g. Dinosaur)'; nameInp.maxLength=24;
+    nameInp.style.cssText='flex:1;background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:10px;padding:8px 10px;font-size:.9rem;outline:none';
+    row1.appendChild(emojiInp); row1.appendChild(nameInp);
+    form.appendChild(row1);
+
+    // Rarity selector
+    const rarRow = document.createElement('div');
+    rarRow.style.cssText='display:flex;gap:6px;flex-wrap:wrap';
+    let selectedRarity='rare';
+    const rarBtns={};
+    [...RAR_ORDER_UP].reverse().forEach(rar=>{
+      const col=RARITY_COLOR[rar]||'#888';
+      const btn=document.createElement('button');
+      btn.style.cssText='border:2px solid '+col+'66;border-radius:8px;padding:5px 10px;font-size:.72rem;font-weight:700;cursor:pointer;text-transform:capitalize;color:'+col+';background:'+(rar===selectedRarity?col+'33':'transparent');
+      btn.textContent=rar;
+      btn.onclick=()=>{
+        selectedRarity=rar;
+        Object.entries(rarBtns).forEach(([r,b])=>{
+          const c=RARITY_COLOR[r]||'#888';
+          b.style.background=r===rar?c+'33':'transparent';
+          b.style.borderColor=r===rar?c:c+'66';
+        });
+      };
+      rarBtns[rar]=btn;
+      rarRow.appendChild(btn);
+    });
+    form.appendChild(rarRow);
+
+    // Count row
+    const countRow = document.createElement('div');
+    countRow.style.cssText='display:flex;gap:8px;align-items:center';
+    const countLbl = document.createElement('div');
+    countLbl.style.cssText='font-size:.78rem;color:var(--muted);font-weight:600;white-space:nowrap';
+    countLbl.textContent='How many in vault:';
+    const countInp = document.createElement('input');
+    countInp.type='number'; countInp.min='1'; countInp.value='50'; countInp.max='9999';
+    countInp.style.cssText='width:80px;background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:10px;padding:7px 10px;font-size:.95rem;font-weight:700;text-align:center;outline:none';
+    countRow.appendChild(countLbl); countRow.appendChild(countInp);
+    form.appendChild(countRow);
+
+    // Preview
+    const prevDiv = document.createElement('div');
+    prevDiv.style.cssText='font-size:.75rem;color:var(--muted);padding:6px 10px;background:var(--surf2);border-radius:8px;min-height:26px';
+    function updatePreview3(){
+      const e=emojiInp.value.trim()||'❓';
+      const n=nameInp.value.trim()||'(unnamed)';
+      const cnt=parseInt(countInp.value,10)||0;
+      const col=RARITY_COLOR[selectedRarity]||'#888';
+      prevDiv.innerHTML='Preview: '+e+' <b style="color:'+col+'">'+n+'</b> · <span style="color:'+col+'">'+selectedRarity+'</span> · '+cnt.toLocaleString()+' copies';
+    }
+    emojiInp.oninput=updatePreview3; nameInp.oninput=updatePreview3; countInp.oninput=updatePreview3;
+    updatePreview3();
+    form.appendChild(prevDiv);
+
+    // Create button
+    const createBtn = document.createElement('button');
+    createBtn.className='ap-apply'; createBtn.textContent='🐾 Add Pet to Vault';
+    createBtn.onclick=()=>{
+      const e=emojiInp.value.trim();
+      const n=nameInp.value.trim();
+      const cnt=parseInt(countInp.value,10)||0;
+      if(!e){ toast('Add an emoji first'); return; }
+      if(!n){ toast('Enter a pet name'); return; }
+      if(cnt<1){ toast('Count must be at least 1'); return; }
+      adminAddCustomPet(n, e, selectedRarity, cnt);
+      emojiInp.value=''; nameInp.value=''; countInp.value='50';
+      updatePreview3();
+    };
+    form.appendChild(createBtn);
+    panel.appendChild(form);
+
+    // ── Existing custom pets list ────────────────────────────────
+    if(customPets.length>0){
+      const divider = document.createElement('div');
+      divider.style.cssText='margin-top:14px;border-top:1px solid var(--bord);padding-top:10px';
+      const divHd = document.createElement('div');
+      divHd.style.cssText='font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px';
+      divHd.textContent='Your custom pets ('+customPets.length+')';
+      divider.appendChild(divHd);
+      customPets.forEach(cp=>{
+        const col=RARITY_COLOR[cp.rarity]||'#888';
+        const cpRow=document.createElement('div');
+        cpRow.style.cssText='display:flex;align-items:center;gap:8px;background:var(--surf2);border:1.5px solid '+col+'44;border-radius:9px;padding:6px 10px;margin-bottom:6px';
+        const cpEmoji=document.createElement('div'); cpEmoji.style.cssText='font-size:1.3rem'; cpEmoji.textContent=cp.emoji;
+        const cpName=document.createElement('div'); cpName.style.cssText='flex:1;font-size:.82rem;font-weight:700;color:var(--txt)'; cpName.textContent=cp.name;
+        const cpRar=document.createElement('div'); cpRar.style.cssText='font-size:.7rem;font-weight:700;color:'+col+';text-transform:capitalize'; cpRar.textContent=cp.rarity;
+        const cpCnt=document.createElement('div'); cpCnt.style.cssText='font-size:.78rem;color:var(--muted);font-variant-numeric:tabular-nums'; cpCnt.textContent=(pool[cp.id]||0)+' in vault';
+        const cpDel=document.createElement('button');
+        cpDel.style.cssText='background:transparent;color:#ff4444;border:1px solid #ff444455;border-radius:6px;padding:3px 8px;font-size:.7rem;cursor:pointer;font-weight:700';
+        cpDel.textContent='✕ Remove';
+        cpDel.onclick=()=>adminDeleteCustomPet(cp.id);
+        cpRow.appendChild(cpEmoji); cpRow.appendChild(cpName); cpRow.appendChild(cpRar); cpRow.appendChild(cpCnt); cpRow.appendChild(cpDel);
+        divider.appendChild(cpRow);
+      });
+      panel.appendChild(divider);
+    }
   }
 
   container.appendChild(panel);
