@@ -449,6 +449,17 @@ nav button:hover:not(.on){color:var(--txt)}
   </div>
 </div>
 
+<!-- ONLINE PLAYERS OVERLAY -->
+<div id="onlineOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:3000;display:none;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:var(--surf2);border:2px solid var(--bord);border-radius:18px;padding:22px;max-width:320px;width:100%;display:flex;flex-direction:column;gap:12px;max-height:80vh;overflow-y:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h2 style="margin:0;font-size:1.1rem;color:#22cc77">🟢 Now Playing</h2>
+      <button class="btn btn-s btn-sm" onclick="document.getElementById('onlineOverlay').style.display='none'">✕</button>
+    </div>
+    <div id="onlinePlayersList"></div>
+  </div>
+</div>
+
 <!-- MAIN APP -->
 <div id="app">
   <header>
@@ -456,7 +467,7 @@ nav button:hover:not(.on){color:var(--txt)}
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
       <div style="display:flex;align-items:center;gap:6px">
         <div id="coinDisp">🪙 <span id="coinCount">0</span></div>
-        <div id="onlineBadge">🟢 <span id="onlineCount">0</span></div>
+        <div id="onlineBadge" onclick="showOnlinePlayers()" style="cursor:pointer">🟢 <span id="onlineCount">0</span></div>
         <button class="btn btn-s btn-sm" onclick="showLeaderboard()" style="font-size:.7rem;padding:3px 8px">🏆</button>
       </div>
       <div id="headerVault" onclick="document.querySelector('nav button[onclick*=vault]').click()" title="Vault — click to see details" style="cursor:pointer;display:flex;align-items:center;gap:4px;font-size:.68rem;color:var(--muted);background:var(--surf2);border:1px solid var(--bord);border-radius:20px;padding:2px 8px;transition:.2s">
@@ -5659,11 +5670,53 @@ function setupOnlinePresence(){
   ref.set(true);
   ref.onDisconnect().remove();
   db.ref('online').on('value',snap=>{
-    const count=snap.val()?Object.keys(snap.val()).length:0;
+    const names=snap.val()?Object.keys(snap.val()):[];
+    const count=names.length;
     const el=document.getElementById('onlineCount');
     if(el) el.textContent=count+(count===1?' player':' players');
     const cel=document.getElementById('chatOnlineCount');
     if(cel) cel.textContent='🟢 '+count+' online';
+    // Refresh online list if overlay is open
+    if(document.getElementById('onlineOverlay')?.style.display==='flex')
+      _renderOnlineList(names);
+  });
+}
+
+function showOnlinePlayers(){
+  const overlay=document.getElementById('onlineOverlay');
+  overlay.style.display='flex';
+  db.ref('online').once('value',snap=>{
+    _renderOnlineList(snap.val()?Object.keys(snap.val()):[]);
+  });
+}
+function _renderOnlineList(names){
+  const list=document.getElementById('onlinePlayersList');
+  if(!list) return;
+  if(!names.length){
+    list.innerHTML='<div style="color:var(--muted);text-align:center;padding:16px">No one else online right now</div>';
+    return;
+  }
+  list.innerHTML='';
+  const fetches=names.map(name=>db.ref('players/'+name+'/profile').once('value').then(s=>({name,profile:s.val()})));
+  Promise.all(fetches).then(players=>{
+    list.innerHTML='';
+    players.forEach(({name,profile})=>{
+      const av=profile?.avatar||'🐾';
+      const isMe=name===currentUser;
+      const row=document.createElement('div');
+      row.style.cssText='display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--surf);border-radius:10px;margin-bottom:6px'+(isMe?';border:1.5px solid #22cc7766':'');
+      const avEl=document.createElement('div');
+      avEl.style.cssText='width:36px;height:36px;border-radius:50%;background:var(--surf2);border:1.5px solid var(--bord);display:flex;align-items:center;justify-content:center;font-size:1.2rem;overflow:hidden;flex-shrink:0';
+      if(isPhoto(av)) avEl.innerHTML='<img src="'+av+'" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+      else avEl.textContent=av;
+      const nameEl=document.createElement('div');
+      nameEl.style.cssText='font-size:.9rem;font-weight:700;color:var(--txt);flex:1';
+      nameEl.textContent=name+(isMe?' (you)':'');
+      const dot=document.createElement('div');
+      dot.style.cssText='width:8px;height:8px;border-radius:50%;background:#22cc77;flex-shrink:0';
+      row.appendChild(avEl); row.appendChild(nameEl); row.appendChild(dot);
+      list.appendChild(row);
+    });
   });
 }
 
