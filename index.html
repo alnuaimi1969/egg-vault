@@ -699,6 +699,7 @@ let save = null;       // { coins, pets:{}, shiny:{}, pity, tools:{}, neon:{}, b
 let pool = {};         // global pool { petId: count }
 let rarityOverrides = {}; // admin overrides { petId: 'newRarity' }
 let poolCapacity = {};    // admin-set maximums { petId: count }
+let reservePool = 0;      // unassigned pet stock admin can distribute any time
 let pendingEgg = null; // EGGS entry or null
 let collFilter = 'all';
 let activeNpc = null;
@@ -791,6 +792,14 @@ function loadRarityOverrides(){
 function saveRarityOverrides(){
   localStorage.setItem('ev2_rar_overrides', JSON.stringify(rarityOverrides));
   db.ref('rarityOverrides').set(rarityOverrides);
+}
+function loadReservePool(){
+  try{ reservePool = parseInt(localStorage.getItem('ev2_reserve')||'0',10)||0; }catch(e){ reservePool=0; }
+  db.ref('reserve').once('value',snap=>{ if(snap.val()!=null) reservePool=snap.val()||0; });
+}
+function saveReservePool(){
+  localStorage.setItem('ev2_reserve', String(reservePool));
+  db.ref('reserve').set(reservePool);
 }
 function adminSetRarity(petId, newRarity){
   const orig = PETS.find(p=>p.id===petId)?.rarity;
@@ -1170,6 +1179,7 @@ function switchUser(){
 function initApp(){
   loadPool();
   loadRarityOverrides();
+  loadReservePool();
   updateCoins();
   updateVaultDisplay(0);
   renderHatch();
@@ -3859,6 +3869,45 @@ function renderVaultAdminPanel(container){
   title.textContent = '🛠️ Bulk Set — Total & Distribution';
   panel.appendChild(title);
 
+  // ── Reserve Pool widget ─────────────────────────────────────────
+  const resBox = document.createElement('div');
+  resBox.style.cssText='background:#0d1a0d;border:1.5px solid #22cc7766;border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap';
+  const resDot = document.createElement('div');
+  resDot.style.cssText='width:10px;height:10px;border-radius:50%;background:#22cc77;flex-shrink:0';
+  const resLbl = document.createElement('div');
+  resLbl.style.cssText='font-size:.75rem;font-weight:700;color:#22cc77;white-space:nowrap';
+  resLbl.textContent = 'Reserve Pool';
+  const resNum = document.createElement('div');
+  resNum.id='reservePoolNum';
+  resNum.style.cssText='font-size:1.1rem;font-weight:900;color:#22cc77;flex:1;font-variant-numeric:tabular-nums';
+  resNum.textContent = reservePool.toLocaleString()+' pets';
+  const resInp = document.createElement('input');
+  resInp.type='number'; resInp.min='0'; resInp.className='ap-rar-inp';
+  resInp.style.cssText='width:80px;font-size:.9rem;font-weight:700;text-align:center;border-color:#22cc7766';
+  resInp.placeholder='Add amount';
+  const resAdd = document.createElement('button');
+  resAdd.style.cssText='background:#22cc77;color:#000;border:none;border-radius:8px;padding:5px 12px;font-size:.8rem;font-weight:900;cursor:pointer;white-space:nowrap';
+  resAdd.textContent='+Add to Reserve';
+  resAdd.onclick=()=>{
+    const n=parseInt(resInp.value,10)||0; if(n<=0) return;
+    reservePool+=n; resInp.value='';
+    saveReservePool();
+    resNum.textContent=reservePool.toLocaleString()+' pets';
+    toast('✔ Added '+n.toLocaleString()+' to reserve ('+reservePool.toLocaleString()+' total)');
+  };
+  const resClear = document.createElement('button');
+  resClear.style.cssText='background:transparent;color:#ff4444;border:1px solid #ff444466;border-radius:8px;padding:5px 10px;font-size:.75rem;font-weight:700;cursor:pointer;white-space:nowrap';
+  resClear.textContent='Clear';
+  resClear.onclick=()=>{
+    if(!confirm('Clear reserve pool (set to 0)?')) return;
+    reservePool=0; saveReservePool();
+    resNum.textContent='0 pets';
+    toast('Reserve cleared');
+  };
+  resBox.appendChild(resDot); resBox.appendChild(resLbl); resBox.appendChild(resNum);
+  resBox.appendChild(resInp); resBox.appendChild(resAdd); resBox.appendChild(resClear);
+  panel.appendChild(resBox);
+
   // Mode tabs
   const tabBar = document.createElement('div');
   tabBar.className = 'ap-tab-bar';
@@ -3993,7 +4042,28 @@ function renderVaultAdminPanel(container){
       pctLabels[rar] = pctLbl;
       inp2.oninput = recalcTotal;
 
-      row2.appendChild(dot); row2.appendChild(lbl2); row2.appendChild(inp2); row2.appendChild(pctLbl);
+      // Transfer from Reserve button
+      const fromResBtn = document.createElement('button');
+      fromResBtn.style.cssText='background:#22cc7722;color:#22cc77;border:1px solid #22cc7755;border-radius:7px;padding:3px 8px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0';
+      fromResBtn.textContent='+Reserve';
+      fromResBtn.title='Transfer pets from Reserve into this rarity';
+      fromResBtn.onclick=()=>{
+        if(reservePool<=0){ toast('Reserve is empty'); return; }
+        const transferAmt = Math.min(reservePool, Math.max(1, Math.round(reservePool*0.25)));
+        const confirmed = prompt('Transfer how many from Reserve ('+reservePool.toLocaleString()+' available) to '+rar+'?', transferAmt);
+        if(confirmed===null) return;
+        const n=parseInt(confirmed,10)||0;
+        if(n<=0||n>reservePool){ toast('Invalid amount'); return; }
+        inp2.value = (parseInt(inp2.value,10)||0)+n;
+        reservePool -= n;
+        saveReservePool();
+        const rn=document.getElementById('reservePoolNum');
+        if(rn) rn.textContent=reservePool.toLocaleString()+' pets';
+        recalcTotal();
+        toast('Moved '+n.toLocaleString()+' from reserve to '+rar);
+      };
+
+      row2.appendChild(dot); row2.appendChild(lbl2); row2.appendChild(inp2); row2.appendChild(fromResBtn); row2.appendChild(pctLbl);
       rarList.appendChild(row2);
     });
     panel.appendChild(rarList);
