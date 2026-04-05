@@ -6223,7 +6223,7 @@ function renderBattle(){
       const card=document.createElement('div'); card.className='battle-card battle-anim';
       card.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">${avEl}<strong>${b.from}</strong> challenges you to a duel!</div>
         <div style="font-size:.78rem;color:var(--muted);margin-bottom:12px;background:var(--surf);padding:8px 10px;border-radius:8px">
-          Pick secretly → revealed at once → 🏆 +1 step wins pet &nbsp;•&nbsp; 🎲 same = dice &nbsp;•&nbsp; 🛡️ +2 = no prize &nbsp;•&nbsp; 💥 ±3 or more = challenger loses their own pet!
+          Pick secretly → revealed at once → 🏆 +1 step wins pet &nbsp;•&nbsp; 🎲 same = dice &nbsp;•&nbsp; 🛡️ +2 = no prize &nbsp;•&nbsp; 💥 ±3 or more = the HIGHER pet loses!
         </div>`;
       const btnRow=document.createElement('div'); btnRow.style.cssText='display:flex;gap:8px';
       const accBtn=document.createElement('button'); accBtn.className='btn btn-p btn-sm'; accBtn.textContent='⚔️ Accept Duel!';
@@ -6355,7 +6355,7 @@ function renderBattle(){
       cSec.appendChild(note);
     } else {
       const rules=document.createElement('div'); rules.style.cssText='font-size:.75rem;color:var(--muted);margin-bottom:12px;background:var(--surf);padding:8px 12px;border-radius:10px;border:1px solid var(--bord);line-height:1.6';
-      rules.innerHTML='🏆 +1 step = WIN their pet &nbsp;•&nbsp; 🎲 Same = dice roll &nbsp;•&nbsp; 🛡️ +2 steps = no prize &nbsp;•&nbsp; 💥 ±3 or more = CHALLENGER loses their pet!';
+      rules.innerHTML='🏆 +1 step = WIN their pet &nbsp;•&nbsp; 🎲 Same = dice roll &nbsp;•&nbsp; 🛡️ +2 steps = no prize &nbsp;•&nbsp; 💥 ±3 or more = the HIGHER pet loses!';
       cSec.appendChild(rules);
       const pList=document.createElement('div'); pList.style.cssText='display:flex;flex-wrap:wrap;gap:8px';
       onlineNames.forEach(name=>{
@@ -6434,10 +6434,10 @@ function tryResolveBattle(battleId, battle){
       prizePetId=null;
       b.nocontest=true;
     } else {
-      // 💥 3+ steps apart → CHALLENGER (b.from) always loses their pet
-      // Doesn't matter if they went too high OR too low — challenger carries all risk
-      winner=b.to;
-      prizePetId=b.fromPick.id;
+      // 💥 3+ steps apart → whoever brought the HIGHER pet loses it
+      // Symmetric: neither player can bait the other — both picks are blind
+      winner=diff>0?b.to:b.from;     // lower rarity player wins
+      prizePetId=diff>0?b.fromPick.id:b.toPick.id; // higher rarity pet is the prize
       b.backfire=true;
     }
     b.winner=winner; b.prizePetId=prizePetId; b.status='done';
