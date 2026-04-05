@@ -959,14 +959,33 @@ function saveEditProfile(){
 }
 function deleteProfile(){
   if(!_editTarget) return;
-  if(!confirm('Delete "'+_editTarget.name+'"? This cannot be undone.')) return;
-  localStorage.removeItem('ev2_save_'+_editTarget.name);
-  db.ref('players/'+_editTarget.name).remove();
-  db.ref('leaderboard/'+_editTarget.name).remove();
-  profiles=profiles.filter(p=>p.name!==_editTarget.name);
+  if(!confirm('Delete "'+_editTarget.name+'"? Their pets will return to the vault.')) return;
+  const name=_editTarget.name;
+  // Load their save to return pets to the vault
+  db.ref('players/'+name+'/save/pets').once('value', snap=>{
+    const pets=snap.val()||{};
+    const poolUpdates={};
+    PETS.forEach(p=>{
+      const owned=pets[p.id]||0;
+      if(owned>0){
+        const current=pool[p.id]||0;
+        const newVal=Math.min(current+owned, p.initCount);
+        pool[p.id]=newVal;
+        poolUpdates['pool/'+p.id]=newVal;
+      }
+    });
+    if(Object.keys(poolUpdates).length) db.ref().update(poolUpdates);
+    localStorage.setItem('ev2_pool', JSON.stringify(pool));
+    updateVaultDisplay(0);
+  });
+  localStorage.removeItem('ev2_save_'+name);
+  db.ref('players/'+name).remove();
+  db.ref('leaderboard/'+name).remove();
+  profiles=profiles.filter(p=>p.name!==name);
   saveProfiles();
   closeEditProfile();
   renderProfileScreen();
+  toast('Profile deleted — pets returned to vault.');
 }
 let _pendingProfile=null;
 function selectProfile(p){
