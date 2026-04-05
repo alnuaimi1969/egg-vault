@@ -782,7 +782,9 @@ function adminSetRarity(petId, newRarity){
   if(newRarity===orig) delete rarityOverrides[petId];
   else rarityOverrides[petId]=newRarity;
   saveRarityOverrides();
+  updateVaultDisplay(0);
   renderVault();
+  toast('Rarity updated → '+newRarity);
 }
 
 let _vaultDisplayTimer=null;
@@ -4047,8 +4049,11 @@ function renderVault(){
     // rarity header row
     const hdr=document.createElement('div');
     hdr.className='vault-rarity-header';
+    const overriddenInRar=rarPets.filter(p=>rarityOverrides[p.id]).length;
     hdr.innerHTML=
-      '<span class="vault-rarity-title" style="color:'+col+'">'+rar+'</span>'+
+      '<span class="vault-rarity-title" style="color:'+col+'">'+rar+
+      (overriddenInRar?' <span style="font-size:.65rem;opacity:.7">('+overriddenInRar+' overridden)</span>':'')+
+      '</span>'+
       '<span class="vault-rarity-stats">'+rarLeft.toLocaleString()+' / '+rarTotal.toLocaleString()+' &nbsp;('+rarPct+'%)'+
       '<span style="display:inline-block;width:60px;height:7px;background:var(--surf2);border-radius:4px;overflow:hidden;margin-left:8px;vertical-align:middle">'+
       '<span style="display:block;height:100%;width:'+rarPct+'%;background:'+col+';border-radius:4px"></span></span></span>';
