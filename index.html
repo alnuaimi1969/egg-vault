@@ -743,9 +743,27 @@ let currentGame = null;
 // ══════════════════════════════════════════════
 //  STORAGE  (Firebase-backed + localStorage cache)
 // ══════════════════════════════════════════════
-function saveProfiles(){ localStorage.setItem('ev2_profiles', JSON.stringify(profiles)); }
+function saveProfiles(){
+  localStorage.setItem('ev2_profiles', JSON.stringify(profiles));
+  db.ref('profiles').set(profiles);
+}
 function loadProfiles(){
   try{ profiles = JSON.parse(localStorage.getItem('ev2_profiles')||'[]'); }catch(e){ profiles=[]; }
+  // Sync from Firebase — merge any profiles not in local cache
+  db.ref('profiles').once('value', snap=>{
+    const remote = snap.val();
+    if(Array.isArray(remote) && remote.length){
+      // Merge: keep local entries, add any remote ones not already present
+      remote.forEach(rp=>{
+        if(!profiles.find(lp=>lp.name===rp.name)) profiles.push(rp);
+      });
+      localStorage.setItem('ev2_profiles', JSON.stringify(profiles));
+      renderProfileScreen();
+    } else if(profiles.length){
+      // First time on Firebase — push local profiles up
+      db.ref('profiles').set(profiles);
+    }
+  });
 }
 function loadSave(u){
   // Synchronous local cache — Firebase sync happens in background after selectProfile
@@ -5658,11 +5676,37 @@ function updateLeaderboard(){
   db.ref('leaderboard/'+currentUser).set({score,topPet:topPet||null,name:currentUser,avatar,lastUpdated:Date.now()});
 }
 
+let _lbAdminUnlocked = false;
 function showLeaderboard(){
   const overlay=document.getElementById('lboardOverlay');
   overlay.style.display='flex';
+  _renderLeaderboard();
+}
+function _renderLeaderboard(){
   const list=document.getElementById('lboardList');
   list.innerHTML='<div style="color:var(--muted);text-align:center;padding:20px">Loading…</div>';
+
+  // Admin toggle button
+  const lboardBox=document.getElementById('lboardBox');
+  let adminToggle=document.getElementById('lbAdminToggle');
+  if(!adminToggle){
+    adminToggle=document.createElement('button');
+    adminToggle.id='lbAdminToggle';
+    adminToggle.style.cssText='font-size:.72rem;background:transparent;border:1px solid var(--bord);border-radius:7px;padding:3px 10px;color:var(--muted);cursor:pointer;align-self:flex-end';
+    adminToggle.textContent=_lbAdminUnlocked?'🔒 Lock':'🔐 Admin';
+    adminToggle.onclick=()=>{
+      if(_lbAdminUnlocked){ _lbAdminUnlocked=false; _renderLeaderboard(); return; }
+      const pw=prompt('Admin password:');
+      if(pw===VAULT_ADMIN_PASS){ _lbAdminUnlocked=true; _renderLeaderboard(); }
+      else toast('Wrong password');
+    };
+    // Insert after h2
+    const h2=lboardBox.querySelector('h2');
+    h2.insertAdjacentElement('afterend', adminToggle);
+  } else {
+    adminToggle.textContent=_lbAdminUnlocked?'🔒 Lock':'🔐 Admin';
+  }
+
   db.ref('leaderboard').once('value',snap=>{
     const all=snap.val()||{};
     const sorted=Object.values(all).sort((a,b)=>b.score-a.score);
@@ -5680,6 +5724,17 @@ function showLeaderboard(){
       const isCur=p.name===currentUser?';background:var(--acc)11;border-radius:8px;padding:4px 8px':'';
       row.style.cssText+=isCur;
       row.innerHTML=`<span class="lb-medal">${medal}</span>${avEl}<div style="flex:1"><div class="lb-name">${p.name}</div><div class="lb-score">⭐ ${p.score.toLocaleString()} pts</div></div>${topEl}`;
+      if(_lbAdminUnlocked){
+        const delBtn=document.createElement('button');
+        delBtn.style.cssText='background:#ff306022;border:1px solid #ff306066;border-radius:7px;padding:3px 8px;color:#ff3060;font-size:.72rem;cursor:pointer;margin-left:6px;flex-shrink:0';
+        delBtn.textContent='🗑';
+        delBtn.onclick=()=>{
+          const prof=profiles.find(x=>x.name===p.name)||{name:p.name,avatar:p.avatar};
+          adminDeleteProfile(prof);
+          _renderLeaderboard();
+        };
+        row.appendChild(delBtn);
+      }
       list.appendChild(row);
     });
   });
