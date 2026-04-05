@@ -752,7 +752,7 @@ function loadSave(u){
     const d = JSON.parse(localStorage.getItem('ev2_save_'+u)||'null');
     if(d) return d;
   }catch(e){}
-  return {coins:300,pets:{},shiny:{},pity:0,tools:{},neon:{},bankDep:0,bankLast:'',lastDaily:'',gameLevels:{}};
+  return {coins:1000,pets:{},shiny:{},pity:0,tools:{},neon:{},bankDep:0,bankLast:'',lastDaily:'',gameLevels:{}};
 }
 let _writeSaveTimer=null;
 function writeSave(){
