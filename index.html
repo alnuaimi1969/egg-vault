@@ -587,6 +587,8 @@ const RARITY_COLOR = {
 };
 const RARITY_PTS = {common:10,uncommon:25,rare:60,epic:150,legendary:400,mythic:1000,celestial:3000,prismatic:10000};
 const SELL_PRICE = {common:50,uncommon:120,rare:350,epic:800,legendary:2000,mythic:5000,celestial:15000,prismatic:50000};
+let sellPriceOverrides = {}; // admin-set overrides per rarity
+function getSellPrice(rarity){ return sellPriceOverrides[rarity] ?? SELL_PRICE[rarity] ?? 0; }
 const NEON_COST  = {common:200,uncommon:500,rare:1200,epic:3000,legendary:8000,mythic:20000,celestial:60000,prismatic:200000};
 const RAR_ORDER  = ['common','uncommon','rare','epic','legendary','mythic','celestial','prismatic'];
 
@@ -851,6 +853,14 @@ function saveToolAdmin(){
   localStorage.setItem('ev2_custom_tools', JSON.stringify(customTools));
   db.ref('toolOverrides').set(toolOverrides);
   db.ref('customTools').set(customTools);
+}
+function loadSellPrices(){
+  try{ sellPriceOverrides = JSON.parse(localStorage.getItem('ev2_sell_prices')||'{}'); }catch(e){ sellPriceOverrides={}; }
+  db.ref('sellPrices').once('value',snap=>{ if(snap.val()) { sellPriceOverrides=snap.val(); } });
+}
+function saveSellPrices(){
+  localStorage.setItem('ev2_sell_prices', JSON.stringify(sellPriceOverrides));
+  db.ref('sellPrices').set(sellPriceOverrides);
 }
 function adminAddCustomPet(name, emoji, rarity, count){
   const id = 'custom_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
@@ -1266,6 +1276,7 @@ function initApp(){
   loadReservePool();
   loadCustomPets();
   loadToolAdmin();
+  loadSellPrices();
   updateCoins();
   updateVaultDisplay(0);
   renderHatch();
@@ -1816,7 +1827,7 @@ function renderCollection(){
       '<div class="pn">'+p.name+'</div>'+
       '<div class="pr" style="color:'+col+'">'+p.rarity+'</div>'+
       '<div class="pc">×'+cnt+'</div>'+
-      '<button onclick="sellOne(\''+p.id+'\')" style="margin-top:6px;width:100%;padding:4px;font-size:.65rem;border-radius:6px;background:var(--surf);border:1px solid var(--bord);color:var(--muted);cursor:pointer">Sell 🪙'+SELL_PRICE[p.rarity]+'</button>';
+      '<button onclick="sellOne(\''+p.id+'\')" style="margin-top:6px;width:100%;padding:4px;font-size:.65rem;border-radius:6px;background:var(--surf);border:1px solid var(--bord);color:var(--muted);cursor:pointer">Sell 🪙'+getSellPrice(p.rarity)+'</button>';
     grid.appendChild(card);
   });
   // Sell all section at bottom
@@ -1826,14 +1837,14 @@ function renderCollection(){
     const allOwned=PETS.filter(p=>(save.pets[p.id]||0)>0);
     if(allOwned.length){
       const hdr=document.createElement('div'); hdr.style.cssText='font-size:.8rem;font-weight:700;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;justify-content:space-between';
-      const totalVal=allOwned.reduce((s,p)=>s+(save.pets[p.id]||0)*SELL_PRICE[p.rarity],0);
+      const totalVal=allOwned.reduce((s,p)=>s+(save.pets[p.id]||0)*getSellPrice(p.rarity),0);
       hdr.innerHTML='<span>💰 Sell Pets</span><span style="color:var(--gold)">Total value: 🪙'+totalVal.toLocaleString()+'</span>';
       sellSec.appendChild(hdr);
       RAR_ORDER.slice().reverse().forEach(rar=>{
         const rarPets=PETS.filter(p=>p.rarity===rar&&(save.pets[p.id]||0)>0);
         if(!rarPets.length) return;
         const col=RARITY_COLOR[rar];
-        const rarTotal=rarPets.reduce((s,p)=>s+(save.pets[p.id]||0)*SELL_PRICE[rar],0);
+        const rarTotal=rarPets.reduce((s,p)=>s+(save.pets[p.id]||0)*getSellPrice(rar),0);
         const row=document.createElement('div');
         row.className='sell-row';
         row.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--surf2);border-radius:10px;margin-bottom:6px;border:1px solid '+col+'33';
@@ -1841,7 +1852,7 @@ function renderCollection(){
           '<span style="font-size:.75rem;color:var(--muted)">'+rarPets.length+' types · 🪙'+rarTotal.toLocaleString()+' total</span>';
         const btn=document.createElement('button'); btn.className='btn btn-s btn-sm';
         btn.textContent='Sell All'; btn.style.color='#ff3060';
-        btn.onclick=()=>{ rarPets.forEach(p=>{ const c=save.pets[p.id]||0; if(c>0){ save.coins+=c*SELL_PRICE[rar]; poolIncrement(p.id); delete save.pets[p.id]; } }); writeSave(); updateCoins(); renderCollection(); snd('sell'); toast('Sold all '+rar+' pets!'); };
+        btn.onclick=()=>{ rarPets.forEach(p=>{ const c=save.pets[p.id]||0; if(c>0){ save.coins+=c*getSellPrice(rar); poolIncrement(p.id); delete save.pets[p.id]; } }); writeSave(); updateCoins(); renderCollection(); snd('sell'); toast('Sold all '+rar+' pets!'); };
         row.appendChild(btn);
         sellSec.appendChild(row);
       });
@@ -1855,11 +1866,11 @@ function sellOne(petId){
   if(!p||(save.pets[petId]||0)<1) return;
   save.pets[petId]--;
   if(save.pets[petId]===0) delete save.pets[petId];
-  save.coins += SELL_PRICE[p.rarity];
+  save.coins += getSellPrice(p.rarity);
   poolIncrement(petId);
   writeSave(); updateCoins(); renderCollection();
   snd('sell');
-  toast('Sold '+p.name+' for 🪙'+SELL_PRICE[p.rarity]+' — returned to vault');
+  toast('Sold '+p.name+' for 🪙'+getSellPrice(p.rarity)+' — returned to vault');
 }
 
 // ══════════════════════════════════════════════
@@ -1910,7 +1921,7 @@ function renderShop(){
           '<span style="color:var(--muted);font-size:.75rem">×'+(save.pets[p.id]||0)+'</span>';
         const btn = document.createElement('button');
         btn.className = 'btn btn-g btn-sm';
-        btn.textContent = 'Sell 🪙'+SELL_PRICE[rar];
+        btn.textContent = 'Sell 🪙'+getSellPrice(rar);
         btn.onclick=()=>sellOne(p.id);
         row.appendChild(btn);
         sSection.appendChild(row);
@@ -4033,9 +4044,15 @@ function renderVaultAdminPanel(container){
   tabTools.textContent = '🔧 Tools';
   tabProp.onclick = ()=>{ _apMode='proportional'; renderVault(); };
   tabRar.onclick  = ()=>{ _apMode='per-rarity';   renderVault(); };
-  tabNew.onclick  = ()=>{ _apMode='new-pet';       renderVault(); };
-  tabTools.onclick= ()=>{ _apMode='tools';         renderVault(); };
-  tabBar.appendChild(tabProp); tabBar.appendChild(tabRar); tabBar.appendChild(tabNew); tabBar.appendChild(tabTools);
+  const tabSell = document.createElement('div');
+  tabSell.className = 'ap-tab'+(_apMode==='sell-prices'?' on':'');
+  tabSell.style.color = _apMode==='sell-prices'?'#fff':'#ffd700';
+  tabSell.textContent = '💰 Sell';
+
+  tabNew.onclick   = ()=>{ _apMode='new-pet';      renderVault(); };
+  tabTools.onclick = ()=>{ _apMode='tools';         renderVault(); };
+  tabSell.onclick  = ()=>{ _apMode='sell-prices';   renderVault(); };
+  tabBar.appendChild(tabProp); tabBar.appendChild(tabRar); tabBar.appendChild(tabNew); tabBar.appendChild(tabTools); tabBar.appendChild(tabSell);
   panel.appendChild(tabBar);
 
   if(_apMode === 'proportional'){
@@ -4818,6 +4835,88 @@ function renderVaultAdminPanel(container){
     addForm.appendChild(addToolBtn);
     addSec.appendChild(addForm);
     panel.appendChild(addSec);
+
+  } else if(_apMode === 'sell-prices'){
+    // ── Sell Prices admin ────────────────────────────────────────
+    const spNote = document.createElement('div');
+    spNote.className='ap-note';
+    spNote.textContent='Set how many coins players receive when they sell each rarity of pet. Changes take effect immediately.';
+    panel.appendChild(spNote);
+
+    const spGrid = document.createElement('div');
+    spGrid.style.cssText='display:flex;flex-direction:column;gap:8px;margin-top:6px';
+
+    const spInputs = {};
+    RAR_ORDER_UP.forEach(rar=>{
+      const col = RARITY_COLOR[rar]||'#888';
+      const current = getSellPrice(rar);
+      const def = SELL_PRICE[rar];
+      const isOverridden = sellPriceOverrides[rar] != null;
+
+      const row = document.createElement('div');
+      row.style.cssText='display:flex;align-items:center;gap:10px;background:var(--surf2);border:1.5px solid '+col+'44;border-radius:10px;padding:9px 13px';
+
+      const dot = document.createElement('div');
+      dot.style.cssText='width:10px;height:10px;border-radius:50%;background:'+col+';flex-shrink:0';
+
+      const lbl = document.createElement('div');
+      lbl.style.cssText='font-size:.82rem;font-weight:700;color:'+col+';text-transform:capitalize;min-width:82px';
+      lbl.textContent=rar;
+
+      const inp = document.createElement('input');
+      inp.type='number'; inp.min='0'; inp.value=current;
+      inp.style.cssText='width:90px;background:var(--surf);border:1.5px solid '+(isOverridden?col:'var(--bord)')+';color:var(--txt);border-radius:8px;padding:6px 8px;font-size:.95rem;font-weight:700;text-align:center;outline:none';
+
+      const defLbl = document.createElement('div');
+      defLbl.style.cssText='font-size:.68rem;color:var(--muted);flex:1';
+      defLbl.textContent='default: 🪙'+def.toLocaleString();
+
+      const resetBtn = document.createElement('button');
+      resetBtn.style.cssText='background:transparent;color:var(--muted);border:1px solid var(--bord);border-radius:6px;padding:3px 8px;font-size:.68rem;cursor:pointer;white-space:nowrap'+(isOverridden?'':';opacity:.4');
+      resetBtn.textContent='Reset';
+      resetBtn.disabled=!isOverridden;
+      resetBtn.onclick=()=>{
+        delete sellPriceOverrides[rar];
+        saveSellPrices();
+        inp.value=SELL_PRICE[rar];
+        inp.style.borderColor='var(--bord)';
+        resetBtn.style.opacity='0.4';
+        resetBtn.disabled=true;
+        toast('🔄 '+rar+' sell price reset to default (🪙'+SELL_PRICE[rar]+')');
+      };
+
+      spInputs[rar] = inp;
+      row.appendChild(dot); row.appendChild(lbl); row.appendChild(inp); row.appendChild(defLbl); row.appendChild(resetBtn);
+      spGrid.appendChild(row);
+    });
+    panel.appendChild(spGrid);
+
+    // Save all button
+    const spSaveBtn = document.createElement('button');
+    spSaveBtn.className='ap-apply'; spSaveBtn.style.marginTop='10px'; spSaveBtn.textContent='💾 Save Sell Prices';
+    spSaveBtn.onclick=()=>{
+      RAR_ORDER_UP.forEach(rar=>{
+        const v=parseInt(spInputs[rar].value,10);
+        if(!isNaN(v)&&v>=0) sellPriceOverrides[rar]=v;
+      });
+      saveSellPrices();
+      toast('✔ Sell prices saved');
+      renderVault(); // refresh to show updated borders
+    };
+    panel.appendChild(spSaveBtn);
+
+    // Preview table
+    const previewDiv = document.createElement('div');
+    previewDiv.style.cssText='margin-top:12px;background:var(--surf2);border-radius:10px;padding:10px 14px;font-size:.72rem;color:var(--muted)';
+    previewDiv.innerHTML='<div style="font-weight:700;color:var(--txt);margin-bottom:6px;font-size:.78rem">Live sell price preview</div>'
+      + RAR_ORDER_UP.map(r=>{
+          const col=RARITY_COLOR[r]||'#888';
+          return '<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid var(--bord)44">'
+            +'<span style="color:'+col+';font-weight:700;text-transform:capitalize">'+r+'</span>'
+            +'<span style="color:var(--gold);font-weight:700">🪙 '+getSellPrice(r).toLocaleString()+'</span>'
+            +'</div>';
+        }).join('');
+    panel.appendChild(previewDiv);
   }
 
   container.appendChild(panel);
@@ -5207,7 +5306,7 @@ function renderFlow(){
     row.innerHTML=
       '<span style="font-weight:700;color:'+RARITY_COLOR[r]+'">'+r.charAt(0).toUpperCase()+r.slice(1)+'</span>'+
       '<span style="color:var(--muted)">'+PETS.filter(p=>p.rarity===r).length+' species</span>'+
-      '<span style="color:var(--gold)">Sell: 🪙'+SELL_PRICE[r].toLocaleString()+'</span>'+
+      '<span style="color:var(--gold)">Sell: 🪙'+getSellPrice(r).toLocaleString()+'</span>'+
       '<span style="color:var(--acc2)">Trade: '+RARITY_PTS[r]+' pts</span>';
     el.appendChild(row);
   });
