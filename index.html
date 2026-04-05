@@ -4042,7 +4042,7 @@ function renderVaultAdminPanel(container){
     panel.appendChild(row);
     panel.appendChild(preview);
 
-  } else {
+  } else if(_apMode === 'per-rarity'){
     // ── Mode B: set per-rarity totals, distribute within rarity by initCount ──
     const note = document.createElement('div');
     note.className = 'ap-note';
