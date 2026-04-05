@@ -520,6 +520,7 @@ nav button:hover:not(.on){color:var(--txt)}
     </div>
     <div id="vaultAdminBar" style="display:none;background:#ff306012;border:1px solid #ff306044;border-radius:10px;padding:8px 14px;margin-top:8px;font-size:.78rem;color:#ff3060;display:none;align-items:center;gap:8px">
       🛠️ <strong>Admin mode active</strong> — edit any pet count directly, then press ✔
+      <button class="btn btn-s btn-sm" onclick="cleanPool();toast('Pool cleaned ✔')" style="font-size:.7rem">🧹 Clean Pool</button>
       <button class="btn btn-s btn-sm" onclick="lockVaultAdmin()" style="margin-left:auto;font-size:.7rem">🔒 Lock</button>
     </div>
     <div id="vaultContent"></div>
@@ -747,7 +748,15 @@ function savePool(){
   localStorage.setItem('ev2_pool', JSON.stringify(pool));
   db.ref('pool').set(pool);
 }
-function poolTotal(){ return Object.values(pool).reduce((s,v)=>s+v,0); }
+// Only count pet IDs that actually exist in the current PETS list
+function poolTotal(){ return PETS.reduce((s,p)=>s+(pool[p.id]||0),0); }
+function cleanPool(){
+  // Remove orphan keys, cap each pet at its initCount
+  const cleaned={};
+  PETS.forEach(p=>{ cleaned[p.id]=Math.min(pool[p.id]||0, p.initCount); });
+  pool=cleaned;
+  savePool();
+}
 function poolCount(id){ return pool[id]??0; }
 function poolDecrement(id){
   if((pool[id]||0)>0){
@@ -3989,8 +3998,8 @@ function renderVault(){
   if(vaultAdminUnlocked) renderVaultAdminPanel(el);
 
   const totalOrig=PETS.reduce((s,p)=>s+p.initCount,0);
-  const left=poolTotal();
-  const pct=Math.max(0,Math.round(left/totalOrig*100));
+  const left=poolTotal(); // uses only known pet IDs
+  const pct=Math.min(100,Math.max(0,Math.round(left/totalOrig*100)));
 
   // ── Big counter ──
   const bigBox=document.createElement('div');
@@ -4005,7 +4014,7 @@ function renderVault(){
       '<div class="vault-big-num" style="color:var(--muted);font-size:1.8rem">'+totalOrig.toLocaleString()+'</div>'+
     '</div>'+
     '<div style="text-align:center">'+
-      '<div class="vault-big-label">Remaining</div>'+
+      '<div class="vault-big-label">% Filled</div>'+
       '<div class="vault-big-num" style="color:'+(pct<30?'#ff3060':pct<60?'#f0c040':'#22c55e')+';font-size:1.8rem">'+pct+'%</div>'+
     '</div>';
   el.appendChild(bigBox);
