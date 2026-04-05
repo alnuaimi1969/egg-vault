@@ -350,7 +350,14 @@ nav button:hover:not(.on){color:var(--txt)}
 <div id="profileScreen">
   <h1>🥚 EggVault</h1>
   <p>Choose a profile to play</p>
-  <button class="btn btn-s btn-sm" onclick="showLeaderboard()" style="gap:6px">🏆 Leaderboard</button>
+  <div style="display:flex;gap:8px;align-items:center">
+    <button class="btn btn-s btn-sm" onclick="showLeaderboard()">🏆 Leaderboard</button>
+    <button id="profileAdminBtn" class="btn btn-s btn-sm" onclick="toggleProfileAdmin()" style="color:var(--muted)">🔐 Admin</button>
+    <button id="profileAdminLockBtn" class="btn btn-s btn-sm" style="display:none;color:#ff3060" onclick="lockProfileAdmin()">🔒 Lock Admin</button>
+  </div>
+  <div id="profileAdminBar" style="display:none;background:#ff306012;border:1px solid #ff306044;border-radius:10px;padding:8px 14px;font-size:.78rem;color:#ff3060;width:100%;max-width:680px;text-align:center">
+    🛠️ Admin mode — you can delete any profile or create new ones
+  </div>
   <div class="pgrid" id="profileGrid"></div>
   <div id="newProfileForm">
     <div style="display:flex;align-items:center;justify-content:space-between">
@@ -843,6 +850,51 @@ function buildAvPick(container, onSelect, onPhotoSel){
   });
   if(container.children.length) container.children[0].classList.add('sel');
 }
+// ── Profile admin ─────────────────────────────────────────────
+let profileAdminUnlocked = false;
+function toggleProfileAdmin(){
+  if(profileAdminUnlocked){ lockProfileAdmin(); return; }
+  const pw=prompt('Enter admin password:');
+  if(pw===null) return;
+  if(pw!==VAULT_ADMIN_PASS){ toast('Wrong password'); return; }
+  profileAdminUnlocked=true;
+  document.getElementById('profileAdminBtn').style.display='none';
+  document.getElementById('profileAdminLockBtn').style.display='';
+  document.getElementById('profileAdminBar').style.display='';
+  renderProfileScreen();
+}
+function lockProfileAdmin(){
+  profileAdminUnlocked=false;
+  document.getElementById('profileAdminBtn').style.display='';
+  document.getElementById('profileAdminLockBtn').style.display='none';
+  document.getElementById('profileAdminBar').style.display='none';
+  renderProfileScreen();
+}
+function adminDeleteProfile(p){
+  if(!confirm('Delete "'+p.name+'"? Their pets will return to the vault.')) return;
+  db.ref('players/'+p.name+'/save/pets').once('value',snap=>{
+    const pets=snap.val()||{};
+    const poolUpdates={};
+    PETS.forEach(pet=>{
+      const owned=pets[pet.id]||0;
+      if(owned>0){
+        const newVal=Math.min((pool[pet.id]||0)+owned, pet.initCount);
+        pool[pet.id]=newVal;
+        poolUpdates['pool/'+pet.id]=newVal;
+      }
+    });
+    if(Object.keys(poolUpdates).length) db.ref().update(poolUpdates);
+    localStorage.setItem('ev2_pool',JSON.stringify(pool));
+    updateVaultDisplay(0);
+  });
+  localStorage.removeItem('ev2_save_'+p.name);
+  db.ref('players/'+p.name).remove();
+  db.ref('leaderboard/'+p.name).remove();
+  profiles=profiles.filter(x=>x.name!==p.name);
+  saveProfiles();
+  renderProfileScreen();
+  toast(p.name+' deleted — pets returned to vault.');
+}
 // ── Render profile screen ─────────────────────────────────────
 function renderProfileScreen(){
   loadProfiles();
@@ -856,9 +908,22 @@ function renderProfileScreen(){
     const avEl=isPhoto(p.avatar)
       ?'<div class="av"><img src="'+p.avatar+'" style="width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid var(--bord)"></div>'
       :'<div class="av">'+p.avatar+'</div>';
-    d.innerHTML=avEl+'<div class="pn">'+p.name+'</div><div class="pi">🪙 '+s.coins.toLocaleString()+'</div><button class="peditbtn">✏️ Edit</button>';
-    d.querySelector('.peditbtn').onclick=e=>{ e.stopPropagation(); openEditProfile(p); };
-    d.onclick=()=>selectProfile(p);
+    d.innerHTML=avEl+'<div class="pn">'+p.name+'</div><div class="pi">🪙 '+s.coins.toLocaleString()+'</div>';
+    if(profileAdminUnlocked){
+      // In admin mode: show delete button, clicking card does nothing
+      const delBtn=document.createElement('button');
+      delBtn.style.cssText='position:absolute;top:6px;right:6px;font-size:.72rem;background:#ff306022;border:1px solid #ff306066;border-radius:7px;padding:3px 8px;color:#ff3060;cursor:pointer;z-index:2';
+      delBtn.textContent='🗑 Delete';
+      delBtn.onclick=e=>{ e.stopPropagation(); adminDeleteProfile(p); };
+      d.appendChild(delBtn);
+    } else {
+      // Normal mode: edit button + click to enter
+      const editBtn=document.createElement('button');
+      editBtn.className='peditbtn'; editBtn.textContent='✏️ Edit';
+      editBtn.onclick=e=>{ e.stopPropagation(); openEditProfile(p); };
+      d.appendChild(editBtn);
+      d.onclick=()=>selectProfile(p);
+    }
     grid.appendChild(d);
   });
   // Always show one "+ New Profile" slot at the end
