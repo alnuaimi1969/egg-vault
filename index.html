@@ -696,6 +696,7 @@ let profiles = [];
 let currentUser = null;
 let save = null;       // { coins, pets:{}, shiny:{}, pity, tools:{}, neon:{}, bankDep, bankLast, lastDaily }
 let pool = {};         // global pool { petId: count }
+let rarityOverrides = {}; // admin overrides { petId: 'newRarity' }
 let pendingEgg = null; // EGGS entry or null
 let collFilter = 'all';
 let activeNpc = null;
@@ -764,6 +765,25 @@ function poolIncrement(id){
   updateVaultDisplay(+1);
 }
 function poolReset(){ PETS.forEach(p=>{ pool[p.id]=p.initCount; }); savePool(); updateVaultDisplay(0); }
+
+// ── Rarity overrides (admin can upgrade/downgrade any pet) ─────
+const RAR_ORDER_UP = ['common','uncommon','rare','epic','legendary','mythic','celestial','prismatic'];
+function getEffectiveRarity(petId){ return rarityOverrides[petId] || PETS.find(p=>p.id===petId)?.rarity || 'common'; }
+function loadRarityOverrides(){
+  try{ rarityOverrides = JSON.parse(localStorage.getItem('ev2_rar_overrides')||'{}'); }catch(e){ rarityOverrides={}; }
+  db.ref('rarityOverrides').once('value',snap=>{ if(snap.val()) rarityOverrides=snap.val(); });
+}
+function saveRarityOverrides(){
+  localStorage.setItem('ev2_rar_overrides', JSON.stringify(rarityOverrides));
+  db.ref('rarityOverrides').set(rarityOverrides);
+}
+function adminSetRarity(petId, newRarity){
+  const orig = PETS.find(p=>p.id===petId)?.rarity;
+  if(newRarity===orig) delete rarityOverrides[petId];
+  else rarityOverrides[petId]=newRarity;
+  saveRarityOverrides();
+  renderVault();
+}
 
 let _vaultDisplayTimer=null;
 function updateVaultDisplay(delta){
@@ -1132,6 +1152,7 @@ function switchUser(){
 // ══════════════════════════════════════════════
 function initApp(){
   loadPool();
+  loadRarityOverrides();
   updateCoins();
   updateVaultDisplay(0);
   renderHatch();
@@ -1172,12 +1193,12 @@ function rollTier(odds){
   return Object.keys(odds)[0];
 }
 function petOfRarity(rar){
-  let pool2 = PETS.filter(p=>p.rarity===rar && poolCount(p.id)>0);
+  let pool2 = PETS.filter(p=>getEffectiveRarity(p.id)===rar && poolCount(p.id)>0);
   if(!pool2.length){
     // climb up
     const idx = RAR_ORDER.indexOf(rar);
     for(let i=idx+1;i<RAR_ORDER.length;i++){
-      pool2 = PETS.filter(p=>p.rarity===RAR_ORDER[i] && poolCount(p.id)>0);
+      pool2 = PETS.filter(p=>getEffectiveRarity(p.id)===RAR_ORDER[i] && poolCount(p.id)>0);
       if(pool2.length) break;
     }
   }
@@ -4015,7 +4036,7 @@ function renderVault(){
 
   // ── Per-rarity sections ──
   [...RAR_ORDER].reverse().forEach(rar=>{
-    const rarPets=PETS.filter(p=>p.rarity===rar);
+    const rarPets=PETS.filter(p=>getEffectiveRarity(p.id)===rar);
     if(!rarPets.length) return;
     const rarLeft=rarPets.reduce((s,p)=>s+poolCount(p.id),0);
     const rarTotal=rarPets.reduce((s,p)=>s+p.initCount,0);
@@ -4055,6 +4076,7 @@ function renderVault(){
         '<div style="font-size:.6rem;color:var(--muted);text-align:right;margin-top:1px">'+pct2+'%</div>';
       // Admin edit row
       if(vaultAdminUnlocked){
+        // Count editor
         const adminRow=document.createElement('div');
         adminRow.className='vault-admin-row';
         const inp=document.createElement('input');
@@ -4065,6 +4087,33 @@ function renderVault(){
         inp.onkeydown=e=>{ if(e.key==='Enter') adminSetCount(p.id, inp.value); };
         adminRow.appendChild(inp); adminRow.appendChild(saveBtn);
         item.appendChild(adminRow);
+        // Rarity upgrade/downgrade row
+        const effRar=getEffectiveRarity(p.id);
+        const rarIdx=RAR_ORDER_UP.indexOf(effRar);
+        const isOverridden=!!rarityOverrides[p.id];
+        const rarRow=document.createElement('div');
+        rarRow.style.cssText='display:flex;align-items:center;gap:4px;margin-top:4px;justify-content:center';
+        const downBtn=document.createElement('button');
+        downBtn.className='vault-admin-save'; downBtn.style.cssText='padding:2px 8px;font-size:.75rem;opacity:'+(rarIdx>0?'1':'0.3');
+        downBtn.textContent='▼ Down'; downBtn.disabled=rarIdx<=0;
+        downBtn.onclick=()=>adminSetRarity(p.id, RAR_ORDER_UP[rarIdx-1]);
+        const rarLabel=document.createElement('span');
+        rarLabel.style.cssText='font-size:.7rem;font-weight:700;color:'+(RARITY_COLOR[effRar]||'var(--muted)')+';flex:1;text-align:center;'+(isOverridden?'text-decoration:underline;text-decoration-style:dotted':'');
+        rarLabel.title=isOverridden?'Override active (original: '+p.rarity+')':'Default rarity';
+        rarLabel.textContent=effRar+(isOverridden?' ✎':'');
+        const upBtn=document.createElement('button');
+        upBtn.className='vault-admin-save'; upBtn.style.cssText='padding:2px 8px;font-size:.75rem;opacity:'+(rarIdx<RAR_ORDER_UP.length-1?'1':'0.3');
+        upBtn.textContent='▲ Up'; upBtn.disabled=rarIdx>=RAR_ORDER_UP.length-1;
+        upBtn.onclick=()=>adminSetRarity(p.id, RAR_ORDER_UP[rarIdx+1]);
+        rarRow.appendChild(downBtn); rarRow.appendChild(rarLabel); rarRow.appendChild(upBtn);
+        item.appendChild(rarRow);
+        if(isOverridden){
+          const resetBtn=document.createElement('button');
+          resetBtn.className='vault-admin-save'; resetBtn.style.cssText='width:100%;margin-top:3px;font-size:.68rem;opacity:.7';
+          resetBtn.textContent='↩ Reset to '+p.rarity;
+          resetBtn.onclick=()=>adminSetRarity(p.id, p.rarity);
+          item.appendChild(resetBtn);
+        }
       }
       grid.appendChild(item);
     });
