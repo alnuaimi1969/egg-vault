@@ -698,6 +698,7 @@ let currentUser = null;
 let save = null;       // { coins, pets:{}, shiny:{}, pity, tools:{}, neon:{}, bankDep, bankLast, lastDaily }
 let pool = {};         // global pool { petId: count }
 let rarityOverrides = {}; // admin overrides { petId: 'newRarity' }
+let poolCapacity = {};    // admin-set maximums { petId: count }
 let pendingEgg = null; // EGGS entry or null
 let collFilter = 'all';
 let activeNpc = null;
@@ -735,14 +736,19 @@ function writeSave(){
 function loadPool(){
   try{ pool = JSON.parse(localStorage.getItem('ev2_pool')||'null') || {}; }catch(e){ pool={}; }
   if(!Object.keys(pool).length){ PETS.forEach(p=>{ pool[p.id]=p.initCount; }); }
+  // Load capacity (admin-set maximums)
+  try{ poolCapacity = JSON.parse(localStorage.getItem('ev2_pool_cap')||'null') || {}; }catch(e){ poolCapacity={}; }
   // Real-time Firebase listener
   db.ref('pool').on('value', snap=>{
     const val=snap.val();
     if(val){ pool=val; localStorage.setItem('ev2_pool',JSON.stringify(pool)); }
     else { db.ref('pool').set(pool); } // first run — write defaults
+    // If no capacity recorded yet, use current pool as baseline
+    PETS.forEach(p=>{ if(!poolCapacity[p.id]) poolCapacity[p.id]=pool[p.id]||p.initCount; });
     updateVaultDisplay(0);
     if(document.getElementById('vault')?.classList.contains('on')) renderVault();
   });
+  db.ref('poolCapacity').once('value',snap=>{ if(snap.val()) poolCapacity=snap.val(); });
 }
 function savePool(){
   localStorage.setItem('ev2_pool', JSON.stringify(pool));
@@ -3831,6 +3837,10 @@ function adminSetCount(petId, newVal){
   const n = parseInt(newVal, 10);
   if(isNaN(n)||n<0){ toast('Invalid number'); return; }
   pool[petId] = n;
+  // Update capacity — the admin-set value becomes the new max for this pet
+  poolCapacity[petId] = Math.max(poolCapacity[petId]||0, n);
+  localStorage.setItem('ev2_pool_cap', JSON.stringify(poolCapacity));
+  db.ref('poolCapacity').set(poolCapacity);
   savePool();
   updateVaultDisplay(0);
   renderVault();
@@ -3997,7 +4007,7 @@ function renderVault(){
   // ── Admin bulk panel (when unlocked) ──
   if(vaultAdminUnlocked) renderVaultAdminPanel(el);
 
-  const totalOrig=PETS.reduce((s,p)=>s+p.initCount,0);
+  const totalOrig=PETS.reduce((s,p)=>s+(poolCapacity[p.id]||p.initCount),0);
   const left=poolTotal(); // uses only known pet IDs
   const pct=Math.min(100,Math.max(0,Math.round(left/totalOrig*100)));
 
@@ -4050,7 +4060,7 @@ function renderVault(){
     const rarPets=PETS.filter(p=>getEffectiveRarity(p.id)===rar);
     if(!rarPets.length) return;
     const rarLeft=rarPets.reduce((s,p)=>s+poolCount(p.id),0);
-    const rarTotal=rarPets.reduce((s,p)=>s+p.initCount,0);
+    const rarTotal=rarPets.reduce((s,p)=>s+(poolCapacity[p.id]||p.initCount),0);
     const rarPct=Math.round(rarLeft/rarTotal*100);
     const col=RARITY_COLOR[rar]||'var(--muted)';
 
@@ -4073,7 +4083,8 @@ function renderVault(){
     grid.className='vault-grid';
     rarPets.sort((a,b)=>poolCount(b.id)-poolCount(a.id)).forEach(p=>{
       const cnt=poolCount(p.id);
-      const pct2=Math.max(0,Math.round(cnt/p.initCount*100));
+      const cap=poolCapacity[p.id]||p.initCount;
+      const pct2=Math.min(100,Math.max(0,Math.round(cnt/cap*100)));
       const isLow=pct2<20&&cnt>0, isEmpty=cnt===0;
       const item=document.createElement('div');
       item.className='vault-item'+(vaultAdminUnlocked?' admin-mode':'');
@@ -4085,7 +4096,7 @@ function renderVault(){
         '<div class="vi-cnt" style="font-size:.8rem;font-weight:700;color:'+(isEmpty?'#ff3060':isLow?'#f0c040':col)+'">'+
           (isEmpty?'EMPTY':cnt+' left')+
         '</div>'+
-        '<div style="font-size:.6rem;color:var(--muted)">of '+p.initCount+' original</div>'+
+        '<div style="font-size:.6rem;color:var(--muted)">of '+(poolCapacity[p.id]||p.initCount)+' total</div>'+
         '<div class="vi-bar" style="margin-top:4px"><div class="vi-fill" style="width:'+pct2+'%;background:'+col+'"></div></div>'+
         '<div style="font-size:.6rem;color:var(--muted);text-align:right;margin-top:1px">'+pct2+'%</div>';
       // Admin edit row
