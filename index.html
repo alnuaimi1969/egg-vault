@@ -690,6 +690,11 @@ const TOOLS = [
   {id:'crystal', name:'Crystal',   emoji:'💎', desc:'Guarantee Legendary or better',   cost:3000,effect:'guarantee_leg'},
 ];
 
+function getTools(){
+  const base = [...TOOLS, ...customTools];
+  return base.map(t => toolOverrides[t.id] ? {...t, ...toolOverrides[t.id]} : t);
+}
+
 // ══════════════════════════════════════════════
 //  STATE
 // ══════════════════════════════════════════════
@@ -701,6 +706,8 @@ let rarityOverrides = {}; // admin overrides { petId: 'newRarity' }
 let poolCapacity = {};    // admin-set maximums { petId: count }
 let reservePool = 0;      // unassigned pet stock admin can distribute any time
 let customPets = [];      // admin-created pets, merged into PETS on load
+let toolOverrides = {};  // { toolId: { name, emoji, cost, desc, effectType, effectParams } }
+let customTools = [];    // admin-created tools pushed into TOOLS
 let pendingEgg = null; // EGGS entry or null
 let collFilter = 'all';
 let activeNpc = null;
@@ -832,6 +839,18 @@ function loadCustomPets(){
 function saveCustomPets(){
   localStorage.setItem('ev2_custom_pets',JSON.stringify(customPets));
   db.ref('customPets').set(customPets);
+}
+function loadToolAdmin(){
+  try{ toolOverrides = JSON.parse(localStorage.getItem('ev2_tool_overrides')||'{}'); }catch(e){ toolOverrides={}; }
+  try{ customTools = JSON.parse(localStorage.getItem('ev2_custom_tools')||'[]'); }catch(e){ customTools=[]; }
+  db.ref('toolOverrides').once('value',snap=>{ if(snap.val()) toolOverrides=snap.val(); });
+  db.ref('customTools').once('value',snap=>{ if(snap.val()&&Array.isArray(snap.val())) customTools=snap.val(); });
+}
+function saveToolAdmin(){
+  localStorage.setItem('ev2_tool_overrides', JSON.stringify(toolOverrides));
+  localStorage.setItem('ev2_custom_tools', JSON.stringify(customTools));
+  db.ref('toolOverrides').set(toolOverrides);
+  db.ref('customTools').set(customTools);
 }
 function adminAddCustomPet(name, emoji, rarity, count){
   const id = 'custom_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
@@ -1246,6 +1265,7 @@ function initApp(){
   loadRarityOverrides();
   loadReservePool();
   loadCustomPets();
+  loadToolAdmin();
   updateCoins();
   updateVaultDisplay(0);
   renderHatch();
@@ -1314,11 +1334,30 @@ function rollPet(egg){
   }
   // Tool effect
   const toolId = save.pendingTool || Object.keys(save.tools||{}).find(k=>(save.tools[k]||0)>0);
-  const tool = toolId ? TOOLS.find(t=>t.id===toolId) : null;
-  const eff = tool?.effect;
+  const tool = toolId ? getTools().find(t=>t.id===toolId) : null;
+  const eff = tool?.effectType || tool?.effect;
+  const ep = tool?.effectParams || {};
   let odds = {...egg.odds};
-  if(eff==='guarantee_leg'){ return petOfRarity('legendary'); }
-  if(eff==='3x_epic'){ ['epic','legendary','mythic','celestial','prismatic'].forEach(r=>{ if(odds[r]) odds[r]*=3; }); }
+  // New flexible effects
+  if(eff==='guarantee_min'){
+    const minIdx = RAR_ORDER_UP.indexOf(ep.minRarity||'legendary');
+    for(let i=RAR_ORDER_UP.length-1;i>=minIdx;i--){
+      const r=RAR_ORDER_UP[i];
+      if(petOfRarity(r)) return petOfRarity(r);
+    }
+    return petOfRarity(ep.minRarity||'legendary');
+  }
+  if(eff==='multiply_from'){
+    const factor = ep.factor||2;
+    const startIdx = RAR_ORDER_UP.indexOf(ep.fromRarity||'rare');
+    RAR_ORDER_UP.slice(startIdx).forEach(r=>{ if(odds[r]) odds[r]*=factor; });
+  }
+  else if(eff==='flat_boost'){
+    (ep.boosts||[]).forEach(b=>{ odds[b.rarity]=(odds[b.rarity]||0)+(b.amount||0); });
+  }
+  // Legacy hardcoded effects (keep for backward compat)
+  else if(eff==='guarantee_leg'){ return petOfRarity('legendary'); }
+  else if(eff==='3x_epic'){ ['epic','legendary','mythic','celestial','prismatic'].forEach(r=>{ if(odds[r]) odds[r]*=3; }); }
   else if(eff==='2x_rare_epic'){ ['rare','epic','legendary','mythic','celestial','prismatic'].forEach(r=>{ if(odds[r]) odds[r]*=2; }); }
   else if(eff==='2x_rare'){ ['rare','epic','legendary'].forEach(r=>{ if(odds[r]) odds[r]*=2; }); }
   else if(eff==='shovel'){ odds.rare=(odds.rare||0)+20; odds.epic=(odds.epic||0)+5; }
@@ -1378,9 +1417,9 @@ function renderHatch(){
   if(pendingEgg){
     buyPanel.style.display   = 'none';
     readyPanel.style.display = 'flex';
-    const boostLabel = pendingEgg && save.pendingTool ? ' (🔧 '+TOOLS.find(x=>x.id===save.pendingTool)?.name+')' : pendingEgg && save.pendingRarity ? ' (⭐ '+save.pendingRarity+' guaranteed)' : '';
+    const boostLabel = pendingEgg && save.pendingTool ? ' (🔧 '+getTools().find(x=>x.id===save.pendingTool)?.name+')' : pendingEgg && save.pendingRarity ? ' (⭐ '+save.pendingRarity+' guaranteed)' : '';
     hint.textContent = 'Tap the egg or press HATCH EGG!'+boostLabel;
-    const refund = (pendingEgg.cost + (save.pendingTool&&!(save.tools?.[save.pendingTool]>1)?TOOLS.find(x=>x.id===save.pendingTool)?.cost||0:0) + (save.pendingRarity?RARITY_BOOST_COST[save.pendingRarity]||0:0));
+    const refund = (pendingEgg.cost + (save.pendingTool&&!(save.tools?.[save.pendingTool]>1)?getTools().find(x=>x.id===save.pendingTool)?.cost||0:0) + (save.pendingRarity?RARITY_BOOST_COST[save.pendingRarity]||0:0));
     document.getElementById('cancelBtn').textContent = '✕ Cancel & refund 🪙'+pendingEgg.cost;
   } else {
     buyPanel.style.display   = 'flex';
@@ -1418,7 +1457,7 @@ function clearBoost(){ _selTool=null; _selRarity=null; renderBoostSection(); upd
 function boostTotalCost(){
   let extra = 0;
   if(_selTool){
-    const t = TOOLS.find(x=>x.id===_selTool);
+    const t = getTools().find(x=>x.id===_selTool);
     if(t && !(save?.tools?.[_selTool]>0)) extra += t.cost; // only charge if not already owned
   }
   if(_selRarity) extra += RARITY_BOOST_COST[_selRarity]||0;
@@ -1478,7 +1517,7 @@ function renderBoostSection(){
 
   if(_boostTab==='tools'){
     const grid = document.createElement('div'); grid.className='btool-grid';
-    TOOLS.forEach(t=>{
+    getTools().forEach(t=>{
       const owned = (save?.tools?.[t.id]||0);
       const isSelected = _selTool===t.id;
       const card = document.createElement('div');
@@ -1537,7 +1576,7 @@ function doBuy(){
   save.coins -= total;
   // If buying a new tool (not from inventory), add it to inventory then it gets consumed on hatch
   if(_selTool){
-    const t = TOOLS.find(x=>x.id===_selTool);
+    const t = getTools().find(x=>x.id===_selTool);
     if(t && !(save.tools?.[_selTool]>0)){
       if(!save.tools) save.tools={};
       save.tools[_selTool] = 1;
@@ -1549,7 +1588,7 @@ function doBuy(){
   save.pendingRarity= _selRarity||null;
   writeSave(); updateCoins();
   snd('buy');
-  let boostMsg = _selTool ? (' + '+TOOLS.find(x=>x.id===_selTool)?.emoji) : _selRarity ? (' + ⭐'+_selRarity+' guarantee') : '';
+  let boostMsg = _selTool ? (' + '+getTools().find(x=>x.id===_selTool)?.emoji) : _selRarity ? (' + ⭐'+_selRarity+' guarantee') : '';
   toast('🥚 '+e.name+' bought'+boostMsg+'! Tap to hatch!');
   renderHatch();
 }
@@ -1834,7 +1873,7 @@ function renderShop(){
   tSection.innerHTML = '<div class="stitle">Tools — boost your hatch odds</div>';
   const tGrid = document.createElement('div');
   tGrid.className = 'shop-grid';
-  TOOLS.forEach(t=>{
+  getTools().forEach(t=>{
     const owned = (save?.tools?.[t.id]||0);
     const card = document.createElement('div');
     card.className = 'shop-item';
@@ -1882,7 +1921,7 @@ function renderShop(){
 }
 function buyTool(id){
   if(!save){ toast('No profile'); return; }
-  const t = TOOLS.find(x=>x.id===id);
+  const t = getTools().find(x=>x.id===id);
   if(!t) return;
   if(save.coins<t.cost){ toast('Need 🪙'+t.cost); return; }
   save.coins -= t.cost;
@@ -3988,10 +4027,15 @@ function renderVaultAdminPanel(container){
   tabNew.className = 'ap-tab'+(_apMode==='new-pet'?' on':'');
   tabNew.style.color = _apMode==='new-pet'?'#fff':'#aaffaa';
   tabNew.textContent = '🐾 New Pet';
+  const tabTools = document.createElement('div');
+  tabTools.className = 'ap-tab'+(_apMode==='tools'?' on':'');
+  tabTools.style.color = _apMode==='tools'?'#fff':'#aaffdd';
+  tabTools.textContent = '🔧 Tools';
   tabProp.onclick = ()=>{ _apMode='proportional'; renderVault(); };
   tabRar.onclick  = ()=>{ _apMode='per-rarity';   renderVault(); };
   tabNew.onclick  = ()=>{ _apMode='new-pet';       renderVault(); };
-  tabBar.appendChild(tabProp); tabBar.appendChild(tabRar); tabBar.appendChild(tabNew);
+  tabTools.onclick= ()=>{ _apMode='tools';         renderVault(); };
+  tabBar.appendChild(tabProp); tabBar.appendChild(tabRar); tabBar.appendChild(tabNew); tabBar.appendChild(tabTools);
   panel.appendChild(tabBar);
 
   if(_apMode === 'proportional'){
@@ -4288,9 +4332,511 @@ function renderVaultAdminPanel(container){
       });
       panel.appendChild(divider);
     }
+  } else if(_apMode === 'tools'){
+    // ── Mode D: Tools admin ──────────────────────────────────────
+    const noteT = document.createElement('div');
+    noteT.className='ap-note';
+    noteT.textContent='Edit existing tools or add custom tools. Changes affect all players immediately.';
+    panel.appendChild(noteT);
+
+    // Section A — Edit existing tools
+    const secHd = document.createElement('div');
+    secHd.style.cssText='font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:8px 0 6px';
+    secHd.textContent='All Tools';
+    panel.appendChild(secHd);
+
+    let _expandedToolId = null;
+
+    function buildToolCard(tool){
+      const isCustom = tool.id.startsWith('custom_');
+      const card = document.createElement('div');
+      card.style.cssText='background:var(--surf2);border:1.5px solid var(--bord);border-radius:10px;padding:10px 12px;margin-bottom:8px';
+
+      // Card header row
+      const hRow = document.createElement('div');
+      hRow.style.cssText='display:flex;align-items:center;gap:8px';
+
+      const emojiDiv = document.createElement('div');
+      emojiDiv.style.cssText='font-size:1.5rem;line-height:1;flex-shrink:0';
+      emojiDiv.textContent = tool.emoji;
+
+      const infoDiv = document.createElement('div');
+      infoDiv.style.cssText='flex:1;min-width:0';
+      const nameDiv = document.createElement('div');
+      nameDiv.style.cssText='font-size:.88rem;font-weight:800;color:var(--txt)';
+      nameDiv.textContent = tool.name;
+      const costDiv = document.createElement('div');
+      costDiv.style.cssText='font-size:.75rem;color:var(--gold);font-weight:700';
+      costDiv.textContent = '🪙'+tool.cost.toLocaleString();
+      const descDiv = document.createElement('div');
+      descDiv.style.cssText='font-size:.7rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      descDiv.textContent = toolEffectDesc(tool);
+      infoDiv.appendChild(nameDiv); infoDiv.appendChild(costDiv); infoDiv.appendChild(descDiv);
+
+      const editBtn = document.createElement('button');
+      editBtn.style.cssText='background:transparent;color:var(--muted);border:1px solid var(--bord);border-radius:6px;padding:4px 8px;font-size:.75rem;cursor:pointer;font-weight:700;flex-shrink:0';
+      editBtn.textContent='✏️';
+      editBtn.onclick=()=>{
+        if(_expandedToolId===tool.id){ _expandedToolId=null; } else { _expandedToolId=tool.id; }
+        renderVault();
+      };
+
+      hRow.appendChild(emojiDiv); hRow.appendChild(infoDiv); hRow.appendChild(editBtn);
+
+      if(isCustom){
+        const delBtn = document.createElement('button');
+        delBtn.style.cssText='background:transparent;color:#ff4444;border:1px solid #ff444455;border-radius:6px;padding:4px 8px;font-size:.75rem;cursor:pointer;font-weight:700;flex-shrink:0';
+        delBtn.textContent='✕';
+        delBtn.onclick=()=>{
+          if(!confirm('Delete custom tool "'+tool.name+'"?')) return;
+          customTools = customTools.filter(t=>t.id!==tool.id);
+          delete toolOverrides[tool.id];
+          saveToolAdmin();
+          renderVault();
+          toast('Tool deleted');
+        };
+        hRow.appendChild(delBtn);
+      }
+      card.appendChild(hRow);
+
+      // Inline edit form (shown when expanded)
+      if(_expandedToolId===tool.id){
+        const form = document.createElement('div');
+        form.style.cssText='margin-top:10px;padding:10px;background:var(--surf);border:1px solid var(--bord);border-radius:8px;display:flex;flex-direction:column;gap:8px';
+
+        // Emoji + Name
+        const r1 = document.createElement('div');
+        r1.style.cssText='display:flex;gap:8px;align-items:center';
+        const fEmoji = document.createElement('input');
+        fEmoji.type='text'; fEmoji.maxLength=2; fEmoji.placeholder='emoji';
+        fEmoji.value = tool.emoji;
+        fEmoji.style.cssText='width:48px;font-size:1.4rem;text-align:center;background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:8px;padding:4px;outline:none';
+        const fName = document.createElement('input');
+        fName.type='text'; fName.maxLength=24; fName.placeholder='Tool name';
+        fName.value = tool.name;
+        fName.style.cssText='flex:1;background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:8px;padding:7px 9px;font-size:.88rem;outline:none';
+        r1.appendChild(fEmoji); r1.appendChild(fName);
+        form.appendChild(r1);
+
+        // Cost + Desc
+        const r2 = document.createElement('div');
+        r2.style.cssText='display:flex;gap:8px;align-items:center';
+        const fCostLbl = document.createElement('div');
+        fCostLbl.style.cssText='font-size:.72rem;color:var(--muted);white-space:nowrap';
+        fCostLbl.textContent='Cost:';
+        const fCost = document.createElement('input');
+        fCost.type='number'; fCost.min='0'; fCost.value=tool.cost;
+        fCost.style.cssText='width:90px;background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:8px;padding:6px 8px;font-size:.88rem;outline:none;text-align:center';
+        r2.appendChild(fCostLbl); r2.appendChild(fCost);
+        form.appendChild(r2);
+
+        const fDescLbl = document.createElement('div');
+        fDescLbl.style.cssText='font-size:.72rem;color:var(--muted)';
+        fDescLbl.textContent='Description (shown to players):';
+        form.appendChild(fDescLbl);
+        const fDesc = document.createElement('input');
+        fDesc.type='text'; fDesc.maxLength=60; fDesc.placeholder='Effect description';
+        fDesc.value = tool.desc||'';
+        fDesc.style.cssText='background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:8px;padding:7px 9px;font-size:.82rem;outline:none;width:100%;box-sizing:border-box';
+        form.appendChild(fDesc);
+
+        // Effect type dropdown
+        const effLbl = document.createElement('div');
+        effLbl.style.cssText='font-size:.72rem;color:var(--muted)';
+        effLbl.textContent='Effect type:';
+        form.appendChild(effLbl);
+        const fEffType = document.createElement('select');
+        fEffType.style.cssText='background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:8px;padding:6px 8px;font-size:.85rem;outline:none;width:100%';
+        [['legacy','Keep original effect'],['guarantee_min','Guaranteed minimum rarity'],['multiply_from','Multiply odds from rarity'],['flat_boost','Flat odds boost']].forEach(([val,lbl])=>{
+          const opt = document.createElement('option');
+          opt.value=val; opt.textContent=lbl;
+          fEffType.appendChild(opt);
+        });
+        const curEffType = tool.effectType || 'legacy';
+        fEffType.value = curEffType;
+        form.appendChild(fEffType);
+
+        // Dynamic params container
+        const paramsDiv = document.createElement('div');
+        form.appendChild(paramsDiv);
+
+        function buildParams(effType){
+          paramsDiv.innerHTML='';
+          const ep2 = tool.effectParams||{};
+          if(effType==='guarantee_min'){
+            const lbl2=document.createElement('div');
+            lbl2.style.cssText='font-size:.72rem;color:var(--muted);margin-bottom:4px';
+            lbl2.textContent='Minimum rarity:';
+            paramsDiv.appendChild(lbl2);
+            const rarRow2=document.createElement('div');
+            rarRow2.style.cssText='display:flex;gap:4px;flex-wrap:wrap';
+            let selMinRar = ep2.minRarity||'legendary';
+            const rarBtns2={};
+            RAR_ORDER_UP.forEach(rar=>{
+              const col2=RARITY_COLOR[rar]||'#888';
+              const b2=document.createElement('button');
+              const isSel2=rar===selMinRar;
+              b2.style.cssText='border:2px solid '+col2+';border-radius:7px;padding:4px 9px;font-size:.7rem;font-weight:800;cursor:pointer;text-transform:capitalize;'+(isSel2?'background:'+col2+';color:#fff;':'background:transparent;color:'+col2+';opacity:.5');
+              b2.textContent=rar;
+              b2.dataset.rar=rar;
+              b2.onclick=()=>{
+                selMinRar=rar;
+                Object.entries(rarBtns2).forEach(([r3,b3])=>{
+                  const c3=RARITY_COLOR[r3]||'#888';
+                  b3.style.background=r3===rar?c3:'transparent';
+                  b3.style.color=r3===rar?'#fff':c3;
+                  b3.style.opacity=r3===rar?'1':'0.5';
+                });
+                paramsDiv._minRarity=selMinRar;
+              };
+              rarBtns2[rar]=b2;
+              rarRow2.appendChild(b2);
+            });
+            paramsDiv._minRarity=selMinRar;
+            paramsDiv.appendChild(rarRow2);
+          } else if(effType==='multiply_from'){
+            const row3=document.createElement('div');
+            row3.style.cssText='display:flex;gap:8px;flex-direction:column';
+            const lbl3a=document.createElement('div');
+            lbl3a.style.cssText='font-size:.72rem;color:var(--muted)';
+            lbl3a.textContent='From rarity (and above):';
+            row3.appendChild(lbl3a);
+            const rarRow3=document.createElement('div');
+            rarRow3.style.cssText='display:flex;gap:4px;flex-wrap:wrap';
+            let selFromRar=ep2.fromRarity||'rare';
+            const rarBtns3={};
+            RAR_ORDER_UP.forEach(rar=>{
+              const col3=RARITY_COLOR[rar]||'#888';
+              const b3=document.createElement('button');
+              const isSel3=rar===selFromRar;
+              b3.style.cssText='border:2px solid '+col3+';border-radius:7px;padding:4px 9px;font-size:.7rem;font-weight:800;cursor:pointer;text-transform:capitalize;'+(isSel3?'background:'+col3+';color:#fff;':'background:transparent;color:'+col3+';opacity:.5');
+              b3.textContent=rar;
+              b3.onclick=()=>{
+                selFromRar=rar;
+                Object.entries(rarBtns3).forEach(([r4,b4])=>{
+                  const c4=RARITY_COLOR[r4]||'#888';
+                  b4.style.background=r4===rar?c4:'transparent';
+                  b4.style.color=r4===rar?'#fff':c4;
+                  b4.style.opacity=r4===rar?'1':'0.5';
+                });
+                paramsDiv._fromRarity=selFromRar;
+              };
+              rarBtns3[rar]=b3;
+              rarRow3.appendChild(b3);
+            });
+            row3.appendChild(rarRow3);
+            const lbl3b=document.createElement('div');
+            lbl3b.style.cssText='font-size:.72rem;color:var(--muted)';
+            lbl3b.textContent='Multiplier (1–10):';
+            row3.appendChild(lbl3b);
+            const fFactor=document.createElement('input');
+            fFactor.type='number'; fFactor.min='1'; fFactor.max='10'; fFactor.step='0.5';
+            fFactor.value=ep2.factor||2;
+            fFactor.style.cssText='width:80px;background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:8px;padding:6px 8px;font-size:.88rem;outline:none;text-align:center';
+            row3.appendChild(fFactor);
+            paramsDiv._fromRarity=selFromRar;
+            paramsDiv._factor=fFactor;
+            paramsDiv.appendChild(row3);
+          } else if(effType==='flat_boost'){
+            const lbl4=document.createElement('div');
+            lbl4.style.cssText='font-size:.72rem;color:var(--muted);margin-bottom:4px';
+            lbl4.textContent='Flat boosts (rarity + amount):';
+            paramsDiv.appendChild(lbl4);
+            const boostsList=document.createElement('div');
+            boostsList.id='boostsList_'+tool.id;
+            const initBoosts = (ep2.boosts&&ep2.boosts.length) ? ep2.boosts : [{rarity:'rare',amount:10}];
+            paramsDiv._boosts=[...initBoosts];
+            function renderBoostRows(){
+              boostsList.innerHTML='';
+              paramsDiv._boosts.forEach((b,i)=>{
+                const bRow=document.createElement('div');
+                bRow.style.cssText='display:flex;gap:6px;align-items:center;margin-bottom:4px';
+                const bRarSel=document.createElement('select');
+                bRarSel.style.cssText='background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:6px;padding:4px 6px;font-size:.8rem;outline:none;flex:1';
+                RAR_ORDER_UP.forEach(rar=>{
+                  const opt2=document.createElement('option');
+                  opt2.value=rar; opt2.textContent=rar;
+                  if(rar===b.rarity) opt2.selected=true;
+                  bRarSel.appendChild(opt2);
+                });
+                bRarSel.onchange=()=>{ paramsDiv._boosts[i].rarity=bRarSel.value; };
+                const bAmtInp=document.createElement('input');
+                bAmtInp.type='number'; bAmtInp.min='1'; bAmtInp.max='100'; bAmtInp.value=b.amount;
+                bAmtInp.style.cssText='width:60px;background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:6px;padding:4px 6px;font-size:.8rem;outline:none;text-align:center';
+                bAmtInp.oninput=()=>{ paramsDiv._boosts[i].amount=parseInt(bAmtInp.value,10)||0; };
+                const bDel=document.createElement('button');
+                bDel.style.cssText='background:transparent;color:#ff4444;border:1px solid #ff444455;border-radius:5px;padding:3px 7px;font-size:.72rem;cursor:pointer';
+                bDel.textContent='✕';
+                bDel.onclick=()=>{ paramsDiv._boosts.splice(i,1); renderBoostRows(); };
+                bRow.appendChild(bRarSel); bRow.appendChild(bAmtInp); bRow.appendChild(bDel);
+                boostsList.appendChild(bRow);
+              });
+              const addBoostBtn=document.createElement('button');
+              addBoostBtn.style.cssText='background:transparent;color:var(--muted);border:1px dashed var(--bord);border-radius:6px;padding:4px 10px;font-size:.75rem;cursor:pointer;width:100%';
+              addBoostBtn.textContent='+ Add boost row';
+              addBoostBtn.onclick=()=>{ paramsDiv._boosts.push({rarity:'rare',amount:10}); renderBoostRows(); };
+              boostsList.appendChild(addBoostBtn);
+            }
+            renderBoostRows();
+            paramsDiv.appendChild(boostsList);
+          }
+        }
+        buildParams(curEffType);
+        fEffType.onchange=()=>buildParams(fEffType.value);
+
+        // Save + Cancel buttons
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText='display:flex;gap:8px;margin-top:4px';
+        const saveBtn = document.createElement('button');
+        saveBtn.className='ap-apply'; saveBtn.textContent='💾 Save';
+        saveBtn.style.cssText='flex:1;background:#22cc77;color:#000;border:none;border-radius:8px;padding:8px;font-size:.85rem;font-weight:900;cursor:pointer';
+        saveBtn.onclick=()=>{
+          const effType = fEffType.value;
+          const override = {
+            emoji: fEmoji.value.trim()||tool.emoji,
+            name: fName.value.trim()||tool.name,
+            cost: parseInt(fCost.value,10)||tool.cost,
+            desc: fDesc.value.trim(),
+          };
+          if(effType!=='legacy'){
+            override.effectType = effType;
+            if(effType==='guarantee_min'){
+              override.effectParams = {minRarity: paramsDiv._minRarity||'legendary'};
+            } else if(effType==='multiply_from'){
+              override.effectParams = {fromRarity: paramsDiv._fromRarity||'rare', factor: parseFloat(paramsDiv._factor?.value)||2};
+            } else if(effType==='flat_boost'){
+              override.effectParams = {boosts: paramsDiv._boosts||[]};
+            }
+          } else {
+            // Remove effectType override so original effect is used
+            delete override.effectType;
+            delete override.effectParams;
+          }
+          if(isCustom){
+            const idx2=customTools.findIndex(t=>t.id===tool.id);
+            if(idx2>-1){ customTools[idx2]={...customTools[idx2],...override}; }
+            if(toolOverrides[tool.id]) delete toolOverrides[tool.id];
+          } else {
+            toolOverrides[tool.id] = override;
+          }
+          saveToolAdmin();
+          _expandedToolId=null;
+          renderVault();
+          toast('✔ Tool "'+override.name+'" saved');
+        };
+        const cancelBtn = document.createElement('button');
+        cancelBtn.style.cssText='flex:1;background:transparent;color:var(--muted);border:1px solid var(--bord);border-radius:8px;padding:8px;font-size:.85rem;cursor:pointer';
+        cancelBtn.textContent='Cancel';
+        cancelBtn.onclick=()=>{ _expandedToolId=null; renderVault(); };
+        btnRow.appendChild(saveBtn); btnRow.appendChild(cancelBtn);
+        form.appendChild(btnRow);
+        card.appendChild(form);
+      }
+
+      return card;
+    }
+
+    getTools().forEach(t=>{ panel.appendChild(buildToolCard(t)); });
+
+    // Section B — Add new custom tool
+    const addSec = document.createElement('div');
+    addSec.style.cssText='margin-top:14px;border-top:1px solid var(--bord);padding-top:12px';
+    const addHd = document.createElement('div');
+    addHd.style.cssText='font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px';
+    addHd.textContent='Add New Custom Tool';
+    addSec.appendChild(addHd);
+
+    let _showAddTool = false;
+    const toggleAddBtn = document.createElement('button');
+    toggleAddBtn.style.cssText='background:transparent;color:#aaffdd;border:1.5px dashed #aaffdd55;border-radius:8px;padding:7px 14px;font-size:.82rem;font-weight:700;cursor:pointer;width:100%';
+    toggleAddBtn.textContent='➕ Add Custom Tool';
+    toggleAddBtn.onclick=()=>{ _showAddTool=!_showAddTool; addForm.style.display=_showAddTool?'flex':'none'; toggleAddBtn.textContent=_showAddTool?'▲ Cancel':'➕ Add Custom Tool'; };
+    addSec.appendChild(toggleAddBtn);
+
+    const addForm = document.createElement('div');
+    addForm.style.cssText='display:none;flex-direction:column;gap:8px;margin-top:8px;padding:10px;background:var(--surf);border:1px solid var(--bord);border-radius:8px';
+
+    const ar1=document.createElement('div'); ar1.style.cssText='display:flex;gap:8px;align-items:center';
+    const aEmoji=document.createElement('input'); aEmoji.type='text'; aEmoji.maxLength=2; aEmoji.placeholder='⚒️';
+    aEmoji.style.cssText='width:48px;font-size:1.4rem;text-align:center;background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:8px;padding:4px;outline:none';
+    const aName=document.createElement('input'); aName.type='text'; aName.maxLength=24; aName.placeholder='Tool name';
+    aName.style.cssText='flex:1;background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:8px;padding:7px 9px;font-size:.88rem;outline:none';
+    ar1.appendChild(aEmoji); ar1.appendChild(aName);
+    addForm.appendChild(ar1);
+
+    const ar2=document.createElement('div'); ar2.style.cssText='display:flex;gap:8px;align-items:center';
+    const aCostLbl=document.createElement('div'); aCostLbl.style.cssText='font-size:.72rem;color:var(--muted);white-space:nowrap'; aCostLbl.textContent='Cost:';
+    const aCost=document.createElement('input'); aCost.type='number'; aCost.min='0'; aCost.value='300';
+    aCost.style.cssText='width:90px;background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:8px;padding:6px 8px;font-size:.88rem;outline:none;text-align:center';
+    ar2.appendChild(aCostLbl); ar2.appendChild(aCost);
+    addForm.appendChild(ar2);
+
+    const aDescLbl=document.createElement('div'); aDescLbl.style.cssText='font-size:.72rem;color:var(--muted)'; aDescLbl.textContent='Description:';
+    addForm.appendChild(aDescLbl);
+    const aDesc=document.createElement('input'); aDesc.type='text'; aDesc.maxLength=60; aDesc.placeholder='Effect description';
+    aDesc.style.cssText='background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:8px;padding:7px 9px;font-size:.82rem;outline:none;width:100%;box-sizing:border-box';
+    addForm.appendChild(aDesc);
+
+    const aEffLbl=document.createElement('div'); aEffLbl.style.cssText='font-size:.72rem;color:var(--muted)'; aEffLbl.textContent='Effect type:';
+    addForm.appendChild(aEffLbl);
+    const aEffType=document.createElement('select');
+    aEffType.style.cssText='background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:8px;padding:6px 8px;font-size:.85rem;outline:none;width:100%';
+    [['guarantee_min','Guaranteed minimum rarity'],['multiply_from','Multiply odds from rarity'],['flat_boost','Flat odds boost']].forEach(([val,lbl])=>{
+      const opt=document.createElement('option'); opt.value=val; opt.textContent=lbl; aEffType.appendChild(opt);
+    });
+    addForm.appendChild(aEffType);
+
+    const aParamsDiv=document.createElement('div');
+    addForm.appendChild(aParamsDiv);
+
+    function buildAddParams(effType){
+      aParamsDiv.innerHTML='';
+      if(effType==='guarantee_min'){
+        const lbl2=document.createElement('div'); lbl2.style.cssText='font-size:.72rem;color:var(--muted);margin-bottom:4px'; lbl2.textContent='Minimum rarity:';
+        aParamsDiv.appendChild(lbl2);
+        const rarRow2=document.createElement('div'); rarRow2.style.cssText='display:flex;gap:4px;flex-wrap:wrap';
+        let selMinRar='legendary';
+        const rarBtns2={};
+        RAR_ORDER_UP.forEach(rar=>{
+          const col2=RARITY_COLOR[rar]||'#888';
+          const b2=document.createElement('button');
+          const isSel2=rar===selMinRar;
+          b2.style.cssText='border:2px solid '+col2+';border-radius:7px;padding:4px 9px;font-size:.7rem;font-weight:800;cursor:pointer;text-transform:capitalize;'+(isSel2?'background:'+col2+';color:#fff;':'background:transparent;color:'+col2+';opacity:.5');
+          b2.textContent=rar;
+          b2.onclick=()=>{
+            selMinRar=rar;
+            Object.entries(rarBtns2).forEach(([r3,b3])=>{
+              const c3=RARITY_COLOR[r3]||'#888';
+              b3.style.background=r3===rar?c3:'transparent';
+              b3.style.color=r3===rar?'#fff':c3;
+              b3.style.opacity=r3===rar?'1':'0.5';
+            });
+            aParamsDiv._minRarity=selMinRar;
+          };
+          rarBtns2[rar]=b2;
+          rarRow2.appendChild(b2);
+        });
+        aParamsDiv._minRarity=selMinRar;
+        aParamsDiv.appendChild(rarRow2);
+      } else if(effType==='multiply_from'){
+        const row3=document.createElement('div'); row3.style.cssText='display:flex;gap:8px;flex-direction:column';
+        const lbl3a=document.createElement('div'); lbl3a.style.cssText='font-size:.72rem;color:var(--muted)'; lbl3a.textContent='From rarity (and above):';
+        row3.appendChild(lbl3a);
+        const rarRow3=document.createElement('div'); rarRow3.style.cssText='display:flex;gap:4px;flex-wrap:wrap';
+        let selFromRar='rare';
+        const rarBtns3={};
+        RAR_ORDER_UP.forEach(rar=>{
+          const col3=RARITY_COLOR[rar]||'#888';
+          const b3=document.createElement('button');
+          const isSel3=rar===selFromRar;
+          b3.style.cssText='border:2px solid '+col3+';border-radius:7px;padding:4px 9px;font-size:.7rem;font-weight:800;cursor:pointer;text-transform:capitalize;'+(isSel3?'background:'+col3+';color:#fff;':'background:transparent;color:'+col3+';opacity:.5');
+          b3.textContent=rar;
+          b3.onclick=()=>{
+            selFromRar=rar;
+            Object.entries(rarBtns3).forEach(([r4,b4])=>{
+              const c4=RARITY_COLOR[r4]||'#888';
+              b4.style.background=r4===rar?c4:'transparent';
+              b4.style.color=r4===rar?'#fff':c4;
+              b4.style.opacity=r4===rar?'1':'0.5';
+            });
+            aParamsDiv._fromRarity=selFromRar;
+          };
+          rarBtns3[rar]=b3;
+          rarRow3.appendChild(b3);
+        });
+        row3.appendChild(rarRow3);
+        const lbl3b=document.createElement('div'); lbl3b.style.cssText='font-size:.72rem;color:var(--muted)'; lbl3b.textContent='Multiplier (1–10):';
+        row3.appendChild(lbl3b);
+        const aFactor=document.createElement('input'); aFactor.type='number'; aFactor.min='1'; aFactor.max='10'; aFactor.step='0.5'; aFactor.value=2;
+        aFactor.style.cssText='width:80px;background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:8px;padding:6px 8px;font-size:.88rem;outline:none;text-align:center';
+        row3.appendChild(aFactor);
+        aParamsDiv._fromRarity=selFromRar;
+        aParamsDiv._factor=aFactor;
+        aParamsDiv.appendChild(row3);
+      } else if(effType==='flat_boost'){
+        const lbl4=document.createElement('div'); lbl4.style.cssText='font-size:.72rem;color:var(--muted);margin-bottom:4px'; lbl4.textContent='Flat boosts:';
+        aParamsDiv.appendChild(lbl4);
+        const boostsList2=document.createElement('div');
+        aParamsDiv._boosts=[{rarity:'rare',amount:10}];
+        function renderAddBoostRows(){
+          boostsList2.innerHTML='';
+          aParamsDiv._boosts.forEach((b,i)=>{
+            const bRow=document.createElement('div'); bRow.style.cssText='display:flex;gap:6px;align-items:center;margin-bottom:4px';
+            const bRarSel=document.createElement('select');
+            bRarSel.style.cssText='background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:6px;padding:4px 6px;font-size:.8rem;outline:none;flex:1';
+            RAR_ORDER_UP.forEach(rar=>{
+              const opt2=document.createElement('option'); opt2.value=rar; opt2.textContent=rar;
+              if(rar===b.rarity) opt2.selected=true;
+              bRarSel.appendChild(opt2);
+            });
+            bRarSel.onchange=()=>{ aParamsDiv._boosts[i].rarity=bRarSel.value; };
+            const bAmtInp=document.createElement('input'); bAmtInp.type='number'; bAmtInp.min='1'; bAmtInp.max='100'; bAmtInp.value=b.amount;
+            bAmtInp.style.cssText='width:60px;background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:6px;padding:4px 6px;font-size:.8rem;outline:none;text-align:center';
+            bAmtInp.oninput=()=>{ aParamsDiv._boosts[i].amount=parseInt(bAmtInp.value,10)||0; };
+            const bDel=document.createElement('button');
+            bDel.style.cssText='background:transparent;color:#ff4444;border:1px solid #ff444455;border-radius:5px;padding:3px 7px;font-size:.72rem;cursor:pointer';
+            bDel.textContent='✕';
+            bDel.onclick=()=>{ aParamsDiv._boosts.splice(i,1); renderAddBoostRows(); };
+            bRow.appendChild(bRarSel); bRow.appendChild(bAmtInp); bRow.appendChild(bDel);
+            boostsList2.appendChild(bRow);
+          });
+          const addBoostBtn2=document.createElement('button');
+          addBoostBtn2.style.cssText='background:transparent;color:var(--muted);border:1px dashed var(--bord);border-radius:6px;padding:4px 10px;font-size:.75rem;cursor:pointer;width:100%';
+          addBoostBtn2.textContent='+ Add boost row';
+          addBoostBtn2.onclick=()=>{ aParamsDiv._boosts.push({rarity:'rare',amount:10}); renderAddBoostRows(); };
+          boostsList2.appendChild(addBoostBtn2);
+        }
+        renderAddBoostRows();
+        aParamsDiv.appendChild(boostsList2);
+      }
+    }
+    buildAddParams(aEffType.value);
+    aEffType.onchange=()=>buildAddParams(aEffType.value);
+
+    const addToolBtn=document.createElement('button');
+    addToolBtn.className='ap-apply';
+    addToolBtn.style.cssText='background:#22cc77;color:#000;border:none;border-radius:8px;padding:9px;font-size:.88rem;font-weight:900;cursor:pointer;margin-top:2px';
+    addToolBtn.textContent='➕ Add Tool';
+    addToolBtn.onclick=()=>{
+      const em=aEmoji.value.trim();
+      const nm=aName.value.trim();
+      const ct=parseInt(aCost.value,10)||300;
+      const ds=aDesc.value.trim();
+      const et=aEffType.value;
+      if(!em){ toast('Add an emoji'); return; }
+      if(!nm){ toast('Enter a tool name'); return; }
+      let ep3={};
+      if(et==='guarantee_min'){ ep3={minRarity:aParamsDiv._minRarity||'legendary'}; }
+      else if(et==='multiply_from'){ ep3={fromRarity:aParamsDiv._fromRarity||'rare', factor:parseFloat(aParamsDiv._factor?.value)||2}; }
+      else if(et==='flat_boost'){ ep3={boosts:aParamsDiv._boosts||[]}; }
+      const newTool={id:'custom_tool_'+Date.now()+'_'+Math.random().toString(36).slice(2,5), name:nm, emoji:em, cost:ct, desc:ds, effectType:et, effectParams:ep3, _custom:true};
+      customTools.push(newTool);
+      saveToolAdmin();
+      renderVault();
+      toast('✔ Tool "'+nm+'" added');
+    };
+    addForm.appendChild(addToolBtn);
+    addSec.appendChild(addForm);
+    panel.appendChild(addSec);
   }
 
   container.appendChild(panel);
+}
+
+function toolEffectDesc(tool){
+  const eff = tool.effectType || tool.effect;
+  const ep = tool.effectParams || {};
+  if(eff==='guarantee_min') return 'Guarantee '+(ep.minRarity||'legendary')+' or better';
+  if(eff==='multiply_from') return (ep.factor||2)+'× odds from '+(ep.fromRarity||'rare')+' up';
+  if(eff==='flat_boost') return (ep.boosts||[]).map(b=>'+'+b.amount+'% '+b.rarity).join(', ');
+  // legacy
+  if(eff==='guarantee_leg') return 'Guarantee legendary+';
+  if(eff==='3x_epic') return '3× epic, legendary, mythic odds';
+  if(eff==='2x_rare_epic') return '2× rare+ and mythic+ odds';
+  if(eff==='2x_rare') return '2× rare, epic, legendary odds';
+  if(eff==='shovel') return '+20% rare, +5% epic chance';
+  if(eff==='boost12') return '+12% rare chance';
+  return tool.desc || '';
 }
 
 function renderVault(){
