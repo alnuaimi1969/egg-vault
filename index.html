@@ -4186,23 +4186,34 @@ function renderVaultAdminPanel(container){
     row1.appendChild(emojiInp); row1.appendChild(nameInp);
     form.appendChild(row1);
 
-    // Rarity selector
+    // Rarity selector label
+    const rarLbl = document.createElement('div');
+    rarLbl.style.cssText='font-size:.78rem;color:var(--muted);font-weight:600';
+    rarLbl.textContent='Choose rarity:';
+    form.appendChild(rarLbl);
+
     const rarRow = document.createElement('div');
     rarRow.style.cssText='display:flex;gap:6px;flex-wrap:wrap';
-    let selectedRarity='rare';
+    let selectedRarity='common';
     const rarBtns={};
-    [...RAR_ORDER_UP].reverse().forEach(rar=>{
+    RAR_ORDER_UP.forEach(rar=>{
       const col=RARITY_COLOR[rar]||'#888';
       const btn=document.createElement('button');
-      btn.style.cssText='border:2px solid '+col+'66;border-radius:8px;padding:5px 10px;font-size:.72rem;font-weight:700;cursor:pointer;text-transform:capitalize;color:'+col+';background:'+(rar===selectedRarity?col+'33':'transparent');
+      const isSel = rar===selectedRarity;
+      btn.style.cssText='border:2px solid '+col+';border-radius:8px;padding:6px 12px;font-size:.75rem;font-weight:800;cursor:pointer;text-transform:capitalize;transition:all .15s;'
+        +(isSel?'background:'+col+';color:#fff;':'background:transparent;color:'+col+';opacity:.5');
       btn.textContent=rar;
       btn.onclick=()=>{
         selectedRarity=rar;
         Object.entries(rarBtns).forEach(([r,b])=>{
           const c=RARITY_COLOR[r]||'#888';
-          b.style.background=r===rar?c+'33':'transparent';
-          b.style.borderColor=r===rar?c:c+'66';
+          const sel=r===rar;
+          b.style.background=sel?c:'transparent';
+          b.style.color=sel?'#fff':c;
+          b.style.opacity=sel?'1':'0.5';
+          b.style.borderColor=c;
         });
+        updatePreview3();
       };
       rarBtns[rar]=btn;
       rarRow.appendChild(btn);
@@ -4216,7 +4227,7 @@ function renderVaultAdminPanel(container){
     countLbl.style.cssText='font-size:.78rem;color:var(--muted);font-weight:600;white-space:nowrap';
     countLbl.textContent='How many in vault:';
     const countInp = document.createElement('input');
-    countInp.type='number'; countInp.min='1'; countInp.value='50'; countInp.max='9999';
+    countInp.type='number'; countInp.min='1'; countInp.value='1'; countInp.max='9999';
     countInp.style.cssText='width:80px;background:var(--surf2);border:1.5px solid var(--bord);color:var(--txt);border-radius:10px;padding:7px 10px;font-size:.95rem;font-weight:700;text-align:center;outline:none';
     countRow.appendChild(countLbl); countRow.appendChild(countInp);
     form.appendChild(countRow);
@@ -4246,7 +4257,7 @@ function renderVaultAdminPanel(container){
       if(!n){ toast('Enter a pet name'); return; }
       if(cnt<1){ toast('Count must be at least 1'); return; }
       adminAddCustomPet(n, e, selectedRarity, cnt);
-      emojiInp.value=''; nameInp.value=''; countInp.value='50';
+      emojiInp.value=''; nameInp.value=''; countInp.value='1';
       updatePreview3();
     };
     form.appendChild(createBtn);
