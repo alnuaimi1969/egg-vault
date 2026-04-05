@@ -1347,6 +1347,7 @@ function enterProfile(p){
   setupOnlinePresence();
   setupTradeListener();
   setupBattleListener();
+  setupPetsListener();
   setupChatListener();
   updateLeaderboard();
   document.getElementById('chatFab').classList.add('visible');
@@ -5688,6 +5689,24 @@ document.addEventListener('click', function(e){
 }, true);
 
 // ══════════════════════════════════════════════
+//  LIVE PETS SYNC — keeps collection in sync
+//  with Firebase so wins/trades/gifts appear
+//  instantly without needing a manual refresh
+// ══════════════════════════════════════════════
+function setupPetsListener(){
+  db.ref('players/'+currentUser+'/save/pets').on('value', snap=>{
+    if(!snap.val() || !save) return;
+    const incoming = snap.val();
+    // Only update if something actually changed
+    if(JSON.stringify(incoming) === JSON.stringify(save.pets)) return;
+    save.pets = incoming;
+    localStorage.setItem('ev2_save_'+currentUser, JSON.stringify(save));
+    updateCoins();
+    if(document.getElementById('collection')?.classList.contains('on')) renderCollection();
+  });
+}
+
+// ══════════════════════════════════════════════
 //  MULTIPLAYER — ONLINE PRESENCE
 // ══════════════════════════════════════════════
 function setupOnlinePresence(){
@@ -6143,9 +6162,7 @@ function setupBattleListener(){
           sessionStorage.setItem(key,'1');
           snd('hatch');
           const pr=PETS.find(p=>p.id===b.prizePetId);
-          toast('🏆 You won the battle vs '+b.from+'! Got '+(pr?.emoji||'🐾')+'!');
-          // Refresh local save
-          db.ref('players/'+currentUser+'/save').once('value',ss=>{ if(ss.val()){save=ss.val();writeSave();localStorage.setItem('ev2_save_'+currentUser,JSON.stringify(save));renderCollection();} });
+          toast('🏆 You won the battle vs '+b.from+'! Got '+(pr?.emoji||'🐾')+'! Check your collection.');
         }
       }
       // Try resolving if both picks are in
@@ -6167,8 +6184,7 @@ function setupBattleListener(){
           sessionStorage.setItem(key,'1');
           snd('hatch');
           const pr=PETS.find(p=>p.id===b.prizePetId);
-          toast('🏆 You won the battle vs '+b.to+'! Got '+(pr?.emoji||'🐾')+'!');
-          db.ref('players/'+currentUser+'/save').once('value',ss=>{ if(ss.val()){save=ss.val();writeSave();localStorage.setItem('ev2_save_'+currentUser,JSON.stringify(save));renderCollection();} });
+          toast('🏆 You won the battle vs '+b.to+'! Got '+(pr?.emoji||'🐾')+'! Check your collection.');
         }
       }
       // Also check for resolution (both picked)
@@ -6457,14 +6473,8 @@ function tryResolveBattle(battleId, battle){
         const updates={};
         updates['players/'+b.winner+'/save/pets/'+b.prizePetId]=(wp[b.prizePetId]||0)+1;
         updates['players/'+loser+'/save/pets/'+b.prizePetId]=Math.max(0,(lp[b.prizePetId]||0)-1);
-        db.ref().update(updates).then(()=>{
-          if(b.winner===currentUser||loser===currentUser){
-            db.ref('players/'+currentUser+'/save').once('value',ss=>{
-              if(ss.val()){save=ss.val();writeSave();localStorage.setItem('ev2_save_'+currentUser,JSON.stringify(save));}
-              renderCollection();
-            });
-          }
-        });
+        db.ref().update(updates);
+        // setupPetsListener() handles the live sync for both players automatically
       });
     });
   });
