@@ -5500,6 +5500,7 @@ function snd(type){
     const ac=getAC(), t=ac.currentTime;
     ({
       // ── UI ──
+      chat:()=>{ _note(ac,880,'sine',.15,t,.07); _note(ac,1100,'sine',.1,t+.07,.07); },
       click:()=>{ _nz(ac,.06,t,.035,3000,10); },
       tab:()=>{ _note(ac,520,'sine',.12,t,.09); _note(ac,780,'sine',.07,t+.05,.08); },
       error:()=>{ _note(ac,220,'sawtooth',.12,t,.09); _note(ac,180,'sawtooth',.1,t+.07,.09); },
@@ -6110,16 +6111,18 @@ function setupChatListener(){
     const isHistory = msg.ts < _chatSetupTime;
     appendChatMsg(msg, isHistory);
     if(_chatOpen) scrollChatBottom();
-    // Badge only for new messages from others
-    if(!isHistory && !_chatOpen && msg.user!==currentUser){
-      _chatUnread++;
-      const badge=document.getElementById('chatBadge');
-      if(badge){ badge.textContent=_chatUnread>9?'9+':String(_chatUnread); badge.classList.add('show'); }
-    }
-    // Show a subtle toast for new messages when chat is closed
-    if(!isHistory && !_chatOpen && msg.user!==currentUser){
-      const av=typeof msg.avatar==='string'&&!msg.avatar.startsWith('data:')?msg.avatar:'💬';
-      toast(av+' '+msg.user+': '+msg.text.slice(0,40)+(msg.text.length>40?'…':''));
+    // New message from someone else — pop open, play sound, show badge
+    if(!isHistory && msg.user!==currentUser){
+      snd('chat');
+      if(!_chatOpen){
+        // Auto-open the chat panel
+        openChat();
+      } else {
+        scrollChatBottom();
+      }
+      // Bounce the FAB to draw attention
+      const fab=document.getElementById('chatFab');
+      if(fab){ fab.style.transform='scale(1.3)'; setTimeout(()=>{ fab.style.transform=''; },250); }
     }
   });
 }
