@@ -119,9 +119,20 @@ html.theme-ice body::before{background:radial-gradient(60px 60px at 8% 12%,#aadd
 html.theme-ice body::after{background:radial-gradient(20px 20px at 5% 30%,#ffffff88 0,transparent 100%),radial-gradient(15px 15px at 18% 10%,#aaddff99 0,transparent 100%),radial-gradient(25px 25px at 35% 65%,#cceeff77 0,transparent 100%),radial-gradient(18px 18px at 52% 20%,#ffffff88 0,transparent 100%),radial-gradient(22px 22px at 67% 75%,#88ccff77 0,transparent 100%),radial-gradient(16px 16px at 78% 42%,#ddf0ff88 0,transparent 100%),radial-gradient(28px 28px at 88% 90%,#aaddff77 0,transparent 100%),radial-gradient(12px 12px at 42% 38%,#ffffff88 0,transparent 100%),radial-gradient(20px 20px at 95% 15%,#cceeee77 0,transparent 100%),radial-gradient(14px 14px at 25% 85%,#ffffff77 0,transparent 100%)}
 
 /* ── HATCH BG PET ── */
-#hatchBgPet{position:fixed;z-index:0;pointer-events:none;user-select:none;
-  font-size:min(210px,30vw);line-height:1;opacity:0;
+#hatchBgPet{position:fixed;z-index:500;pointer-events:auto;user-select:none;
+  font-size:min(210px,30vw);line-height:1;opacity:0;cursor:pointer;
   will-change:transform,left,top}
+#hatchCoinHUD{position:fixed;top:68px;left:50%;transform:translateX(-50%);
+  z-index:9500;background:rgba(0,0,0,.82);backdrop-filter:blur(14px);
+  border:1.5px solid rgba(255,210,0,.5);border-radius:18px;
+  padding:10px 22px;display:flex;flex-direction:column;align-items:center;gap:4px;
+  min-width:170px;text-align:center;pointer-events:none;
+  box-shadow:0 0 30px rgba(255,200,0,.35);animation:bounceIn .4s cubic-bezier(.36,.07,.19,.97) both}
+@keyframes petTap{
+  0%  {filter:brightness(1)}
+  30% {filter:brightness(3.5)}
+  100%{filter:brightness(1)}
+}
 
 /* ── FLOATING BG PETS ── */
 .bg-pet{position:fixed;z-index:0;pointer-events:none;
@@ -2017,15 +2028,23 @@ function showReveal(pet, isShiny, prevCount){
     : ['epic','legendary'].includes(pet.rarity) ? 'revealEnterEpic .65s cubic-bezier(.22,.61,.36,1) both'
     : 'revealEnter .5s cubic-bezier(.22,.61,.36,1) both';
 
+  // Backdrop (full-screen, dims bg)
+  const backdrop = document.createElement('div');
+  backdrop.id = 'revealPopup';
+  backdrop.style.cssText = 'position:fixed;inset:0;z-index:999999;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.65)';
+
+  // Smaller card
   const ov = document.createElement('div');
-  ov.id = 'revealPopup';
   ov.style.cssText = [
-    'position:fixed','top:0','left:0','right:0','bottom:0',
-    'background:rgba(0,0,0,.97)',
-    'z-index:999999',
+    'width:min(340px,92vw)',
+    'max-height:88vh',
+    'overflow-y:auto',
+    'background:rgba(0,0,10,.95)',
     'display:flex','flex-direction:column','align-items:center','justify-content:center',
-    'gap:18px','padding:28px','text-align:center',
-    'border:4px solid '+col,
+    'gap:10px','padding:18px 16px','text-align:center',
+    'border:3px solid '+col,
+    'border-radius:22px',
+    'box-shadow:0 0 50px '+col+'66',
     'animation:'+enterAnim
   ].join(';');
 
@@ -2035,15 +2054,15 @@ function showReveal(pet, isShiny, prevCount){
   hd.textContent = '✨  A  PET  HATCHED  ✨';
   ov.appendChild(hd);
 
-  // Pet emoji — HUGE
+  // Pet emoji
   const em = document.createElement('div');
-  em.style.cssText = 'font-size:10rem;line-height:1;animation:bounceIn .55s cubic-bezier(.36,.07,.19,.97) both';
+  em.style.cssText = 'font-size:5.5rem;line-height:1;animation:bounceIn .55s cubic-bezier(.36,.07,.19,.97) both';
   em.textContent = pet.emoji || '❓';
   ov.appendChild(em);
 
   // Pet name
   const nm = document.createElement('div');
-  nm.style.cssText = 'font-size:2.6rem;font-weight:900;color:#fff;animation:bounceIn .55s .1s both';
+  nm.style.cssText = 'font-size:1.6rem;font-weight:900;color:#fff;animation:bounceIn .55s .1s both';
   nm.textContent = pet.name || 'Unknown';
   ov.appendChild(nm);
 
@@ -2089,7 +2108,7 @@ function showReveal(pet, isShiny, prevCount){
   viewBtn.style.cssText = 'padding:18px 52px;font-size:1.1rem;font-weight:900;background:linear-gradient(135deg,#44aaff,#a78bfa);color:#fff;border:none;border-radius:18px;cursor:pointer;box-shadow:0 6px 24px rgba(68,170,255,.45)';
   viewBtn.textContent = '✅  View Collection';
   viewBtn.onclick = function(){
-    ov.remove();
+    backdrop.remove();
     renderHatch();
     const colBtn = document.querySelector('nav button[onclick*="collection"]');
     showTab('collection', colBtn);
@@ -2097,12 +2116,13 @@ function showReveal(pet, isShiny, prevCount){
   btnRow.appendChild(viewBtn);
 
   const moreBtn = document.createElement('button');
-  moreBtn.style.cssText = 'padding:18px 36px;font-size:1rem;font-weight:800;background:rgba(255,255,255,.1);color:#fff;border:2px solid rgba(255,255,255,.28);border-radius:18px;cursor:pointer';
+  moreBtn.style.cssText = 'padding:14px 28px;font-size:.95rem;font-weight:800;background:rgba(255,255,255,.1);color:#fff;border:2px solid rgba(255,255,255,.28);border-radius:16px;cursor:pointer';
   moreBtn.textContent = '🥚  Hatch Another';
-  moreBtn.onclick = function(){ ov.remove(); renderHatch(); };
+  moreBtn.onclick = function(){ backdrop.remove(); renderHatch(); };
   btnRow.appendChild(moreBtn);
 
   ov.appendChild(btnRow);
+  backdrop.appendChild(ov);
 
   // ── Large swimming pet in background ──
   const oldBgPet = document.getElementById('hatchBgPet');
@@ -2114,7 +2134,7 @@ function showReveal(pet, isShiny, prevCount){
   document.body.appendChild(bgPet);
   swimHatchPet(bgPet, pet);
 
-  document.body.appendChild(ov);
+  document.body.appendChild(backdrop);
 }
 
 // ══════════════════════════════════════════════
@@ -7152,80 +7172,111 @@ document.addEventListener('click', e => {
 
 function swimHatchPet(el, pet){
   const size = Math.min(210, window.innerWidth * 0.30);
-  let timer;
+  let swimTimer, countInterval;
+  const baseFilter = el.style.filter || '';
 
-  // ── Coin tap system ──
-  const rarityBase = {common:6,uncommon:12,rare:22,epic:40,legendary:70,mythic:100,celestial:130,prismatic:180};
-  const base  = rarityBase[pet?.rarity||'common'] || 10;
-  const maxTaps = Math.floor(Math.random()*5)+8;  // 8–12 taps
-  let tapsLeft = maxTaps;
-  let currentReward = base;
+  // ── 10-second coin window ──
+  const rarityBase={common:6,uncommon:12,rare:22,epic:40,legendary:70,mythic:100,celestial:130,prismatic:180};
+  const baseReward = rarityBase[pet?.rarity||'common'] || 8;
+  let totalEarned = 0;
+  let secondsLeft = 10;
+  let windowActive = true;
 
-  el.style.cursor = 'pointer';
-  el.style.pointerEvents = 'auto';
+  // Build HUD
+  const oldHud = document.getElementById('hatchCoinHUD');
+  if(oldHud) oldHud.remove();
+  const hud = document.createElement('div');
+  hud.id = 'hatchCoinHUD';
+  hud.innerHTML =
+    '<div style="font-size:.65rem;opacity:.6;text-transform:uppercase;letter-spacing:2px;margin-bottom:2px">Tap the pet!</div>'+
+    '<div style="font-size:1.9rem;font-weight:900;color:var(--gold);line-height:1">🪙 +<span id="hcTotal">0</span></div>'+
+    '<div id="hcTimerRow" style="font-size:1rem;font-weight:800;color:#fff">⏱ <span id="hcTimer">10</span>s</div>'+
+    '<div style="width:140px;height:5px;background:#ffffff22;border-radius:4px;margin-top:4px;overflow:hidden">'+
+      '<div id="hcBar" style="height:100%;width:100%;background:var(--gold);border-radius:4px;transition:width 1s linear"></div>'+
+    '</div>';
+  document.body.appendChild(hud);
+
+  // Countdown tick
+  countInterval = setInterval(()=>{
+    secondsLeft--;
+    const timerEl = document.getElementById('hcTimer');
+    const barEl   = document.getElementById('hcBar');
+    const rowEl   = document.getElementById('hcTimerRow');
+    if(timerEl) timerEl.textContent = secondsLeft;
+    if(barEl)   barEl.style.width   = (secondsLeft/10*100)+'%';
+    if(rowEl && secondsLeft<=3) rowEl.style.color='#ff4444';
+    if(secondsLeft<=0){
+      clearInterval(countInterval);
+      windowActive = false;
+      el.style.pointerEvents = 'none';
+      el.style.cursor = 'default';
+      // Drain flash
+      el.style.transition = 'filter .4s, opacity .6s';
+      el.style.filter = 'grayscale(1) brightness(.28)';
+      el.style.opacity = '.25';
+      // HUD shows total then fades
+      hud.innerHTML = '<div style="font-size:1.3rem;font-weight:900;color:var(--gold)">🪙 +'+totalEarned+'</div>'+
+                      '<div style="font-size:.8rem;color:#ff8888;margin-top:2px">💀 Drained!</div>';
+      // Drained popup in centre screen
+      const drain = document.createElement('div');
+      drain.className = 'pet-coin-pop';
+      drain.style.cssText='left:50%;transform:translateX(-50%);top:45%;font-size:2.2rem;color:#ff4444;text-shadow:0 0 30px #ff0000,0 0 60px #ff0000;';
+      drain.textContent = '💀 DRAINED!';
+      document.body.appendChild(drain);
+      setTimeout(()=>drain.remove(), 1400);
+      setTimeout(()=>hud.remove(), 2500);
+    }
+  }, 1000);
+
+  // Click handler
   el.addEventListener('click', function(e){
+    if(!windowActive) return;
     e.stopPropagation();
-    if(tapsLeft <= 0) return;
-    tapsLeft--;
-    const earned = Math.max(1, Math.round(currentReward * (0.85 + Math.random()*0.3)));
-    currentReward *= 0.72;  // each tap gives ~72% of previous
-
-    // Award coins
-    if(save){ save.coins = (save.coins||0) + earned; updateCoins(); writeSave(); }
-
-    // Floating coin popup at click position
+    const earned = Math.round(baseReward*(0.7+Math.random()*0.65));
+    totalEarned += earned;
+    if(save){ save.coins=(save.coins||0)+earned; updateCoins(); writeSave(); }
+    const totalEl = document.getElementById('hcTotal');
+    if(totalEl) totalEl.textContent = totalEarned;
+    // Flash pet bright
+    el.style.transition='filter .08s';
+    el.style.filter='brightness(4) '+baseFilter;
+    setTimeout(()=>{ el.style.filter=baseFilter; el.style.transition=''; },150);
+    // Floating +N coin at click pos
     const pop = document.createElement('div');
     pop.className = 'pet-coin-pop';
     pop.textContent = '+'+earned+' 🪙';
-    pop.style.left = (e.clientX - 40)+'px';
-    pop.style.top  = (e.clientY - 20)+'px';
+    pop.style.left=(e.clientX-40)+'px';
+    pop.style.top=(e.clientY-20)+'px';
     document.body.appendChild(pop);
-    setTimeout(()=>pop.remove(), 1200);
-
-    // Dramatic drain when last tap
-    if(tapsLeft === 0){
-      setTimeout(()=>{
-        // Big "DRAINED!" flash
-        const drain = document.createElement('div');
-        drain.className = 'pet-coin-pop';
-        drain.style.cssText += ';font-size:1.3rem;color:#ff4444;text-shadow:0 0 20px #ff0000;left:'+(window.innerWidth/2-60)+'px;top:'+(parseFloat(el.style.top)||100)+'px';
-        drain.textContent = '💀 DRAINED!';
-        document.body.appendChild(drain);
-        setTimeout(()=>drain.remove(), 1400);
-        // Grey out + drain animation
-        el.style.filter = 'grayscale(1) brightness(0.35)';
-        el.style.animation = 'drainedPulse 1.2s ease-out forwards';
-        el.style.cursor = 'default';
-        el.style.pointerEvents = 'none';
-      }, 300);
-    }
+    setTimeout(()=>pop.remove(),1200);
+    // Sound
+    snd('buy');
   });
 
   // ── Swimming ──
-  el.style.left = (window.innerWidth/2 - size/2)+'px';
-  el.style.top  = (window.innerHeight/2 - size/2)+'px';
-  el.style.transform = 'scale(0.1) rotate(-20deg)';
-  el.style.transition = 'none';
+  el.style.left=(window.innerWidth/2-size/2)+'px';
+  el.style.top=(window.innerHeight/2-size/2)+'px';
+  el.style.transform='scale(0.1) rotate(-20deg)';
+  el.style.transition='none';
   requestAnimationFrame(()=>requestAnimationFrame(()=>{
-    el.style.transition = 'left .9s cubic-bezier(.22,.61,.36,1), top .9s cubic-bezier(.22,.61,.36,1), transform .9s cubic-bezier(.22,.61,.36,1), opacity .6s';
-    el.style.transform = 'scale(1) rotate(0deg)';
-    el.style.opacity   = '0.52';
-    timer = setTimeout(swim, 1000);
+    el.style.transition='left .9s cubic-bezier(.22,.61,.36,1),top .9s cubic-bezier(.22,.61,.36,1),transform .9s cubic-bezier(.22,.61,.36,1),opacity .6s';
+    el.style.transform='scale(1) rotate(0deg)';
+    el.style.opacity='0.55';
+    swimTimer=setTimeout(swim,1000);
   }));
   function swim(){
-    const W = window.innerWidth, H = window.innerHeight;
-    const dur = 2500 + Math.random()*4500;
-    const x   = Math.random() * Math.max(0, W-size);
-    const y   = Math.random() * Math.max(0, H-size);
-    const rot = (Math.random()-0.5)*50;
-    const sc  = 0.75 + Math.random()*0.45;
-    el.style.transition = `left ${dur}ms cubic-bezier(.45,.05,.55,.95), top ${dur}ms cubic-bezier(.45,.05,.55,.95), transform ${dur}ms ease`;
-    el.style.left      = x+'px';
-    el.style.top       = y+'px';
-    el.style.transform = `scale(${sc}) rotate(${rot}deg)`;
-    timer = setTimeout(swim, dur-400);
+    const W=window.innerWidth,H=window.innerHeight;
+    const dur=2500+Math.random()*4500;
+    const x=Math.random()*Math.max(0,W-size);
+    const y=Math.random()*Math.max(0,H-size);
+    const rot=(Math.random()-.5)*50;
+    const sc=0.75+Math.random()*0.45;
+    el.style.transition=`left ${dur}ms cubic-bezier(.45,.05,.55,.95),top ${dur}ms cubic-bezier(.45,.05,.55,.95),transform ${dur}ms ease`;
+    el.style.left=x+'px'; el.style.top=y+'px';
+    el.style.transform=`scale(${sc}) rotate(${rot}deg)`;
+    swimTimer=setTimeout(swim,dur-400);
   }
-  el._stopSwim = ()=>clearTimeout(timer);
+  el._stopSwim=()=>{ clearTimeout(swimTimer); clearInterval(countInterval); };
 }
 
 function spawnBgPets(){
