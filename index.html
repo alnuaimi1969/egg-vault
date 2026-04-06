@@ -78,15 +78,15 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 #profileScreen h1{font-size:2.4rem;background:linear-gradient(135deg,var(--acc2),var(--gold));
   -webkit-background-clip:text;-webkit-text-fill-color:transparent;text-align:center}
 #profileScreen>p{color:var(--muted);font-size:.95rem}
-.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;max-width:680px;width:100%}
-.pcard{background:var(--surf2);border:2px solid var(--bord);border-radius:14px;padding:18px;
-  display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;transition:all .2s;position:relative}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px;max-width:480px;width:100%}
+.pcard{background:var(--surf2);border:2px solid var(--bord);border-radius:10px;padding:10px 8px;
+  display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;transition:all .2s;position:relative}
 .pcard:hover{border-color:var(--acc);transform:translateY(-2px)}
 .pcard.empty{border-style:dashed;opacity:.65}
-.pcard .av{font-size:2.4rem;line-height:1}
-.pcard .av img{width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid var(--bord)}
-.pcard .pn{font-weight:700;font-size:.92rem;text-align:center;word-break:break-word}
-.pcard .pi{font-size:.75rem;color:var(--muted)}
+.pcard .av{font-size:1.5rem;line-height:1}
+.pcard .av img{width:32px;height:32px;border-radius:50%;object-fit:cover;border:2px solid var(--bord)}
+.pcard .pn{font-weight:700;font-size:.72rem;text-align:center;word-break:break-word}
+.pcard .pi{font-size:.62rem;color:var(--muted)}
 .pcard .peditbtn{position:absolute;top:6px;right:6px;font-size:.75rem;background:var(--surf);border:1px solid var(--bord);border-radius:7px;padding:3px 6px;opacity:0;transition:opacity .15s;z-index:2;cursor:pointer;color:var(--muted)}
 .pcard:hover .peditbtn{opacity:1}
 #newProfileForm{background:var(--surf2);border:2px solid var(--bord);border-radius:14px;
