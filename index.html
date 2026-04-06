@@ -7131,23 +7131,28 @@ function spawnBgPets(){
   ];
   const anims=['bgFloat1','bgFloat2','bgFloat3','bgFloat4','bgFloat5','bgFloat6','bgFloat7','bgFloat8'];
   const r=()=>Math.random();
-  const count=Math.floor(r()*6)+7; // 7–12 pets each load
+  const count=Math.floor(r()*10)+15; // 15–25 pets each load
   const shuffled=[...pool].sort(()=>r()-.5);
   for(let i=0;i<count;i++){
     const emoji=shuffled[i%shuffled.length];
     const el=document.createElement('div');
     el.className='bg-pet';
     el.textContent=emoji;
-    const size=Math.floor(r()*28)+24; // 24–52px
-    const opacity=(r()*0.25)+0.25;    // 0.25–0.50
+    const size=Math.floor(r()*50)+20;  // 20–70px
+    const opacity=r()<0.3
+      ? (r()*0.15)+0.08                // 30% chance: very faded (0.08–0.23)
+      : r()<0.5
+        ? (r()*0.25)+0.55              // 20% chance: very clear (0.55–0.80)
+        : (r()*0.25)+0.28;             // 50% chance: mid (0.28–0.53)
     el.style.fontSize=size+'px';
     el.style.opacity=opacity;
-    el.style.left=Math.floor(r()*90)+'%';
-    el.style.top=Math.floor(r()*85)+'%';
-    el.style.filter=`drop-shadow(0 0 ${Math.floor(r()*10)+6}px rgba(255,255,255,.5))`;
+    el.style.left=Math.floor(r()*92)+'%';
+    el.style.top=Math.floor(r()*88)+'%';
+    const glow=Math.floor(r()*16)+6;
+    el.style.filter=`drop-shadow(0 0 ${glow}px rgba(255,255,255,${(opacity*0.8).toFixed(2)}))`;
     const anim=anims[Math.floor(r()*anims.length)];
-    const dur=Math.floor(r()*20)+15;   // 15–35s
-    const delay=-(Math.floor(r()*30)); // random start offset
+    const dur=Math.floor(r()*25)+12;   // 12–37s
+    const delay=-(Math.floor(r()*40));
     el.style.animation=`${anim} ${dur}s ease-in-out infinite`;
     el.style.animationDelay=delay+'s';
     document.body.appendChild(el);
