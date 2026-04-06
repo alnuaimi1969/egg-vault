@@ -120,20 +120,8 @@ html.theme-ice body::after{background:radial-gradient(20px 20px at 5% 30%,#fffff
 
 /* ── HATCH BG PET ── */
 #hatchBgPet{position:fixed;z-index:0;pointer-events:none;user-select:none;
-  font-size:min(210px,30vw);line-height:1;
-  left:50%;top:46%;
-  animation:hatchBgFloat 5s ease-in-out infinite;
-  will-change:transform}
-@keyframes hatchBgFloat{
-  0%  {transform:translate(-50%,-50%) scale(1)   rotate(-3deg)}
-  50% {transform:translate(-50%,-57%) scale(1.08) rotate(3deg)}
-  100%{transform:translate(-50%,-50%) scale(1)   rotate(-3deg)}
-}
-@keyframes hatchBgIn{
-  0%  {opacity:0;transform:translate(-50%,-50%) scale(.3) rotate(-15deg)}
-  60% {transform:translate(-50%,-50%) scale(1.1) rotate(4deg)}
-  100%{transform:translate(-50%,-57%) scale(1)  rotate(3deg)}
-}
+  font-size:min(210px,30vw);line-height:1;opacity:0;
+  will-change:transform,left,top}
 
 /* ── FLOATING BG PETS ── */
 .bg-pet{position:fixed;z-index:0;pointer-events:none;
@@ -2102,16 +2090,15 @@ function showReveal(pet, isShiny, prevCount){
 
   ov.appendChild(btnRow);
 
-  // ── Large floating pet in background ──
+  // ── Large swimming pet in background ──
   const oldBgPet = document.getElementById('hatchBgPet');
-  if(oldBgPet) oldBgPet.remove();
+  if(oldBgPet){ if(oldBgPet._stopSwim) oldBgPet._stopSwim(); oldBgPet.remove(); }
   const bgPet = document.createElement('div');
   bgPet.id = 'hatchBgPet';
   bgPet.textContent = pet.emoji || '❓';
-  bgPet.style.opacity = '0.52';
   bgPet.style.filter = `drop-shadow(0 0 40px ${col}) drop-shadow(0 0 80px ${col}88)`;
-  bgPet.style.animation = 'hatchBgIn .9s cubic-bezier(.22,.61,.36,1) both, hatchBgFloat 5s ease-in-out 0.9s infinite';
   document.body.appendChild(bgPet);
+  swimHatchPet(bgPet);
 
   document.body.appendChild(ov);
 }
@@ -7148,6 +7135,37 @@ document.addEventListener('click', e => {
     panel.classList.remove('open');
   }
 });
+
+function swimHatchPet(el){
+  const size = Math.min(210, window.innerWidth * 0.30);
+  let timer;
+  // Start centre, scaled down
+  el.style.left = (window.innerWidth/2 - size/2)+'px';
+  el.style.top  = (window.innerHeight/2 - size/2)+'px';
+  el.style.transform = 'scale(0.1) rotate(-20deg)';
+  el.style.transition = 'none';
+  // Entrance burst
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    el.style.transition = 'left .9s cubic-bezier(.22,.61,.36,1), top .9s cubic-bezier(.22,.61,.36,1), transform .9s cubic-bezier(.22,.61,.36,1), opacity .6s';
+    el.style.transform = 'scale(1) rotate(0deg)';
+    el.style.opacity   = '0.52';
+    timer = setTimeout(swim, 1000);
+  }));
+  function swim(){
+    const W = window.innerWidth, H = window.innerHeight;
+    const dur = 2500 + Math.random()*4500;          // 2.5–7s per move
+    const x   = Math.random() * Math.max(0, W-size);
+    const y   = Math.random() * Math.max(0, H-size);
+    const rot = (Math.random()-0.5)*50;              // –25° to +25°
+    const sc  = 0.75 + Math.random()*0.45;           // 0.75–1.2
+    el.style.transition = `left ${dur}ms cubic-bezier(.45,.05,.55,.95), top ${dur}ms cubic-bezier(.45,.05,.55,.95), transform ${dur}ms ease`;
+    el.style.left      = x+'px';
+    el.style.top       = y+'px';
+    el.style.transform = `scale(${sc}) rotate(${rot}deg)`;
+    timer = setTimeout(swim, dur-400);
+  }
+  el._stopSwim = ()=>clearTimeout(timer);
+}
 
 function spawnBgPets(){
   const pool=[
