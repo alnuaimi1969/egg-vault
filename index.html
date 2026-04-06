@@ -118,6 +118,23 @@ html.theme-ice body{background:linear-gradient(135deg,#001428 0%,#003355 25%,#00
 html.theme-ice body::before{background:radial-gradient(60px 60px at 8% 12%,#aaddff55 0,transparent 100%),radial-gradient(45px 45px at 22% 72%,#cceeff55 0,transparent 100%),radial-gradient(80px 80px at 38% 28%,#ffffff4a 0,transparent 100%),radial-gradient(55px 55px at 55% 85%,#88ccff55 0,transparent 100%),radial-gradient(70px 70px at 70% 15%,#ddf0ff55 0,transparent 100%),radial-gradient(40px 40px at 82% 60%,#aaddff55 0,transparent 100%),radial-gradient(65px 65px at 92% 35%,#cceeee55 0,transparent 100%),radial-gradient(50px 50px at 15% 50%,#ffffff44 0,transparent 100%),radial-gradient(35px 35px at 48% 55%,#88eeff44 0,transparent 100%),radial-gradient(90px 90px at 30% 90%,#aaddff33 0,transparent 100%),radial-gradient(30px 30px at 75% 80%,#ffffff44 0,transparent 100%),radial-gradient(75px 75px at 60% 50%,#ccffff33 0,transparent 100%)}
 html.theme-ice body::after{background:radial-gradient(20px 20px at 5% 30%,#ffffff88 0,transparent 100%),radial-gradient(15px 15px at 18% 10%,#aaddff99 0,transparent 100%),radial-gradient(25px 25px at 35% 65%,#cceeff77 0,transparent 100%),radial-gradient(18px 18px at 52% 20%,#ffffff88 0,transparent 100%),radial-gradient(22px 22px at 67% 75%,#88ccff77 0,transparent 100%),radial-gradient(16px 16px at 78% 42%,#ddf0ff88 0,transparent 100%),radial-gradient(28px 28px at 88% 90%,#aaddff77 0,transparent 100%),radial-gradient(12px 12px at 42% 38%,#ffffff88 0,transparent 100%),radial-gradient(20px 20px at 95% 15%,#cceeee77 0,transparent 100%),radial-gradient(14px 14px at 25% 85%,#ffffff77 0,transparent 100%)}
 
+/* ── HATCH BG PET ── */
+#hatchBgPet{position:fixed;z-index:0;pointer-events:none;user-select:none;
+  font-size:min(210px,30vw);line-height:1;
+  left:50%;top:46%;
+  animation:hatchBgFloat 5s ease-in-out infinite;
+  will-change:transform}
+@keyframes hatchBgFloat{
+  0%  {transform:translate(-50%,-50%) scale(1)   rotate(-3deg)}
+  50% {transform:translate(-50%,-57%) scale(1.08) rotate(3deg)}
+  100%{transform:translate(-50%,-50%) scale(1)   rotate(-3deg)}
+}
+@keyframes hatchBgIn{
+  0%  {opacity:0;transform:translate(-50%,-50%) scale(.3) rotate(-15deg)}
+  60% {transform:translate(-50%,-50%) scale(1.1) rotate(4deg)}
+  100%{transform:translate(-50%,-57%) scale(1)  rotate(3deg)}
+}
+
 /* ── FLOATING BG PETS ── */
 .bg-pet{position:fixed;z-index:0;pointer-events:none;
   will-change:transform;user-select:none;line-height:1}
@@ -2084,6 +2101,18 @@ function showReveal(pet, isShiny, prevCount){
   btnRow.appendChild(moreBtn);
 
   ov.appendChild(btnRow);
+
+  // ── Large floating pet in background ──
+  const oldBgPet = document.getElementById('hatchBgPet');
+  if(oldBgPet) oldBgPet.remove();
+  const bgPet = document.createElement('div');
+  bgPet.id = 'hatchBgPet';
+  bgPet.textContent = pet.emoji || '❓';
+  bgPet.style.opacity = '0.52';
+  bgPet.style.filter = `drop-shadow(0 0 40px ${col}) drop-shadow(0 0 80px ${col}88)`;
+  bgPet.style.animation = 'hatchBgIn .9s cubic-bezier(.22,.61,.36,1) both, hatchBgFloat 5s ease-in-out 0.9s infinite';
+  document.body.appendChild(bgPet);
+
   document.body.appendChild(ov);
 }
 
