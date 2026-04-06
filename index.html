@@ -119,9 +119,8 @@ html.theme-ice body::before{background:radial-gradient(60px 60px at 8% 12%,#aadd
 html.theme-ice body::after{background:radial-gradient(20px 20px at 5% 30%,#ffffff88 0,transparent 100%),radial-gradient(15px 15px at 18% 10%,#aaddff99 0,transparent 100%),radial-gradient(25px 25px at 35% 65%,#cceeff77 0,transparent 100%),radial-gradient(18px 18px at 52% 20%,#ffffff88 0,transparent 100%),radial-gradient(22px 22px at 67% 75%,#88ccff77 0,transparent 100%),radial-gradient(16px 16px at 78% 42%,#ddf0ff88 0,transparent 100%),radial-gradient(28px 28px at 88% 90%,#aaddff77 0,transparent 100%),radial-gradient(12px 12px at 42% 38%,#ffffff88 0,transparent 100%),radial-gradient(20px 20px at 95% 15%,#cceeee77 0,transparent 100%),radial-gradient(14px 14px at 25% 85%,#ffffff77 0,transparent 100%)}
 
 /* ── FLOATING BG PETS ── */
-.bg-pet{position:fixed;z-index:0;pointer-events:none;font-size:3rem;
-  opacity:.18;filter:drop-shadow(0 0 12px rgba(255,255,255,.4));
-  will-change:transform;user-select:none}
+.bg-pet{position:fixed;z-index:0;pointer-events:none;
+  will-change:transform;user-select:none;line-height:1}
 @keyframes bgFloat1{
   0%  {transform:translate(0,0) rotate(-4deg) scale(1)}
   30% {transform:translate(55px,-90px) rotate(9deg) scale(1.12)}
@@ -140,6 +139,37 @@ html.theme-ice body::after{background:radial-gradient(20px 20px at 5% 30%,#fffff
   55% {transform:translate(-55px,-120px) rotate(-9deg) scale(.96)}
   80% {transform:translate(20px,-65px) rotate(4deg) scale(1.04)}
   100%{transform:translate(0,0) rotate(-2deg) scale(1)}
+}
+@keyframes bgFloat4{
+  0%  {transform:translate(0,0) rotate(8deg) scale(1)}
+  40% {transform:translate(80px,-60px) rotate(-5deg) scale(1.08)}
+  75% {transform:translate(-20px,-110px) rotate(12deg) scale(.95)}
+  100%{transform:translate(0,0) rotate(8deg) scale(1)}
+}
+@keyframes bgFloat5{
+  0%  {transform:translate(0,0) rotate(-10deg) scale(1)}
+  20% {transform:translate(-60px,-40px) rotate(6deg) scale(1.1)}
+  50% {transform:translate(30px,-100px) rotate(-8deg) scale(.93)}
+  80% {transform:translate(-40px,-60px) rotate(10deg) scale(1.05)}
+  100%{transform:translate(0,0) rotate(-10deg) scale(1)}
+}
+@keyframes bgFloat6{
+  0%  {transform:translate(0,0) rotate(3deg) scale(1)}
+  33% {transform:translate(-45px,-70px) rotate(-14deg) scale(1.15)}
+  66% {transform:translate(60px,-120px) rotate(8deg) scale(.9)}
+  100%{transform:translate(0,0) rotate(3deg) scale(1)}
+}
+@keyframes bgFloat7{
+  0%  {transform:translate(0,0) rotate(-6deg) scale(1)}
+  45% {transform:translate(70px,-50px) rotate(10deg) scale(1.07)}
+  90% {transform:translate(-30px,-90px) rotate(-4deg) scale(.96)}
+  100%{transform:translate(0,0) rotate(-6deg) scale(1)}
+}
+@keyframes bgFloat8{
+  0%  {transform:translate(0,0) rotate(12deg) scale(1)}
+  25% {transform:translate(-80px,-80px) rotate(-6deg) scale(1.1)}
+  60% {transform:translate(50px,-140px) rotate(15deg) scale(.92)}
+  100%{transform:translate(0,0) rotate(12deg) scale(1)}
 }
 
 /* ── THEME PICKER UI ── */
@@ -7091,22 +7121,37 @@ document.addEventListener('click', e => {
 });
 
 function spawnBgPets(){
-  const pool=['🐲','🦋','🌟','🐉','🦄','🐸','🦊','🐼','🌈','🔮','🐬','🦅','🐺','🦁','🐧','🦎','🦜','🐳'];
-  const picks=pool.sort(()=>Math.random()-.5).slice(0,3);
-  const anims=['bgFloat1','bgFloat2','bgFloat3'];
-  const pos=[{left:'8%',top:'15%'},{left:'72%',top:'42%'},{left:'38%',top:'70%'}];
-  const durs=[22,28,19];
-  const delays=[0,-9,-15];
-  picks.forEach((emoji,i)=>{
+  const pool=[
+    '🐲','🦋','🌟','🐉','🦄','🐸','🦊','🐼','🌈','🔮',
+    '🐬','🦅','🐺','🦁','🦎','🦜','🐳','🦈','🐊','🦋',
+    '🦩','🦚','🦉','🦇','🐙','🦑','🐠','🐡','🦀','🦞',
+    '🐝','🦗','🦋','🐌','🦔','🐿','🦫','🦭','🦦','🦥',
+    '🐻','🐯','🦊','🐨','🐮','🐷','🐸','🐵','🦁','🐺',
+    '🦄','🐲','🐉','🌙','⭐','💫','✨','🌠','🎆','🎇',
+  ];
+  const anims=['bgFloat1','bgFloat2','bgFloat3','bgFloat4','bgFloat5','bgFloat6','bgFloat7','bgFloat8'];
+  const r=()=>Math.random();
+  const count=Math.floor(r()*6)+7; // 7–12 pets each load
+  const shuffled=[...pool].sort(()=>r()-.5);
+  for(let i=0;i<count;i++){
+    const emoji=shuffled[i%shuffled.length];
     const el=document.createElement('div');
     el.className='bg-pet';
     el.textContent=emoji;
-    el.style.left=pos[i].left;
-    el.style.top=pos[i].top;
-    el.style.animation=`${anims[i]} ${durs[i]}s ease-in-out infinite`;
-    el.style.animationDelay=delays[i]+'s';
+    const size=Math.floor(r()*28)+24; // 24–52px
+    const opacity=(r()*0.25)+0.25;    // 0.25–0.50
+    el.style.fontSize=size+'px';
+    el.style.opacity=opacity;
+    el.style.left=Math.floor(r()*90)+'%';
+    el.style.top=Math.floor(r()*85)+'%';
+    el.style.filter=`drop-shadow(0 0 ${Math.floor(r()*10)+6}px rgba(255,255,255,.5))`;
+    const anim=anims[Math.floor(r()*anims.length)];
+    const dur=Math.floor(r()*20)+15;   // 15–35s
+    const delay=-(Math.floor(r()*30)); // random start offset
+    el.style.animation=`${anim} ${dur}s ease-in-out infinite`;
+    el.style.animationDelay=delay+'s';
     document.body.appendChild(el);
-  });
+  }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
