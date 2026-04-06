@@ -119,15 +119,15 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
 /* ── MAIN APP ── */
 #app{position:relative;z-index:1;max-width:920px;margin:0 auto;padding:0 0 80px;display:none}
 header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;
-  background:var(--surf);border-bottom:1px solid var(--bord);position:sticky;top:0;z-index:100;gap:10px}
+  background:transparent;border-bottom:none;position:sticky;top:0;z-index:100;gap:10px}
 header h1{font-size:1.35rem;background:linear-gradient(135deg,var(--acc2),var(--gold));
   -webkit-background-clip:text;-webkit-text-fill-color:transparent;white-space:nowrap}
 #coinDisp{display:flex;align-items:center;gap:5px;background:var(--surf2);border:1px solid var(--bord);
   padding:5px 12px;border-radius:20px;font-weight:700;color:var(--gold);font-size:.92rem}
-nav{display:flex;background:var(--surf);border-bottom:1px solid var(--bord);overflow-x:auto;position:sticky;top:55px;z-index:99}
-nav button{flex:1;min-width:66px;padding:13px 6px;background:none;color:var(--muted);
+nav{display:flex;background:transparent;border-bottom:none;overflow-x:auto;position:sticky;top:55px;z-index:99;padding:6px 10px;gap:6px}
+nav button{flex:1;min-width:66px;padding:10px 6px;background:#ffffff15;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:20px;border:1px solid #ffffff25;color:var(--muted);
   font-size:.75rem;font-weight:600;border-bottom:3px solid transparent;transition:all .2s;white-space:nowrap}
-nav button.on{color:var(--acc2);border-bottom-color:var(--acc2)}
+nav button.on{color:var(--acc2);background:#ff4dc430;border-color:#ff4dc460;border-bottom-color:transparent}
 nav button:hover:not(.on){color:var(--txt)}
 .tab{padding:18px;display:none}
 .tab.on{display:block}
