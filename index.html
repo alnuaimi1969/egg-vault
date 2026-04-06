@@ -118,6 +118,30 @@ html.theme-ice body{background:linear-gradient(135deg,#001428 0%,#003355 25%,#00
 html.theme-ice body::before{background:radial-gradient(60px 60px at 8% 12%,#aaddff55 0,transparent 100%),radial-gradient(45px 45px at 22% 72%,#cceeff55 0,transparent 100%),radial-gradient(80px 80px at 38% 28%,#ffffff4a 0,transparent 100%),radial-gradient(55px 55px at 55% 85%,#88ccff55 0,transparent 100%),radial-gradient(70px 70px at 70% 15%,#ddf0ff55 0,transparent 100%),radial-gradient(40px 40px at 82% 60%,#aaddff55 0,transparent 100%),radial-gradient(65px 65px at 92% 35%,#cceeee55 0,transparent 100%),radial-gradient(50px 50px at 15% 50%,#ffffff44 0,transparent 100%),radial-gradient(35px 35px at 48% 55%,#88eeff44 0,transparent 100%),radial-gradient(90px 90px at 30% 90%,#aaddff33 0,transparent 100%),radial-gradient(30px 30px at 75% 80%,#ffffff44 0,transparent 100%),radial-gradient(75px 75px at 60% 50%,#ccffff33 0,transparent 100%)}
 html.theme-ice body::after{background:radial-gradient(20px 20px at 5% 30%,#ffffff88 0,transparent 100%),radial-gradient(15px 15px at 18% 10%,#aaddff99 0,transparent 100%),radial-gradient(25px 25px at 35% 65%,#cceeff77 0,transparent 100%),radial-gradient(18px 18px at 52% 20%,#ffffff88 0,transparent 100%),radial-gradient(22px 22px at 67% 75%,#88ccff77 0,transparent 100%),radial-gradient(16px 16px at 78% 42%,#ddf0ff88 0,transparent 100%),radial-gradient(28px 28px at 88% 90%,#aaddff77 0,transparent 100%),radial-gradient(12px 12px at 42% 38%,#ffffff88 0,transparent 100%),radial-gradient(20px 20px at 95% 15%,#cceeee77 0,transparent 100%),radial-gradient(14px 14px at 25% 85%,#ffffff77 0,transparent 100%)}
 
+/* ── FLOATING BG PETS ── */
+.bg-pet{position:fixed;z-index:0;pointer-events:none;font-size:3rem;
+  opacity:.18;filter:drop-shadow(0 0 12px rgba(255,255,255,.4));
+  will-change:transform;user-select:none}
+@keyframes bgFloat1{
+  0%  {transform:translate(0,0) rotate(-4deg) scale(1)}
+  30% {transform:translate(55px,-90px) rotate(9deg) scale(1.12)}
+  60% {transform:translate(-35px,-150px) rotate(-6deg) scale(.92)}
+  100%{transform:translate(0,0) rotate(-4deg) scale(1)}
+}
+@keyframes bgFloat2{
+  0%  {transform:translate(0,0) rotate(5deg) scale(1)}
+  35% {transform:translate(-70px,-80px) rotate(-12deg) scale(1.1)}
+  70% {transform:translate(40px,-130px) rotate(7deg) scale(.94)}
+  100%{transform:translate(0,0) rotate(5deg) scale(1)}
+}
+@keyframes bgFloat3{
+  0%  {transform:translate(0,0) rotate(-2deg) scale(1)}
+  25% {transform:translate(45px,-55px) rotate(14deg) scale(1.06)}
+  55% {transform:translate(-55px,-120px) rotate(-9deg) scale(.96)}
+  80% {transform:translate(20px,-65px) rotate(4deg) scale(1.04)}
+  100%{transform:translate(0,0) rotate(-2deg) scale(1)}
+}
+
 /* ── THEME PICKER UI ── */
 #themePanel{position:fixed;bottom:70px;right:14px;z-index:9999;
   background:rgba(8,0,24,.88);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
@@ -7066,9 +7090,29 @@ document.addEventListener('click', e => {
   }
 });
 
+function spawnBgPets(){
+  const pool=['🐲','🦋','🌟','🐉','🦄','🐸','🦊','🐼','🌈','🔮','🐬','🦅','🐺','🦁','🐧','🦎','🦜','🐳'];
+  const picks=pool.sort(()=>Math.random()-.5).slice(0,3);
+  const anims=['bgFloat1','bgFloat2','bgFloat3'];
+  const pos=[{left:'8%',top:'15%'},{left:'72%',top:'42%'},{left:'38%',top:'70%'}];
+  const durs=[22,28,19];
+  const delays=[0,-9,-15];
+  picks.forEach((emoji,i)=>{
+    const el=document.createElement('div');
+    el.className='bg-pet';
+    el.textContent=emoji;
+    el.style.left=pos[i].left;
+    el.style.top=pos[i].top;
+    el.style.animation=`${anims[i]} ${durs[i]}s ease-in-out infinite`;
+    el.style.animationDelay=delays[i]+'s';
+    document.body.appendChild(el);
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   buildThemePanel();
   applyTheme(localStorage.getItem('ev_theme') || 'candy');
+  spawnBgPets();
 });
 </script>
 <!-- GIFT MODAL -->
