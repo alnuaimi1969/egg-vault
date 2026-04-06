@@ -7066,8 +7066,10 @@ document.addEventListener('click', e => {
   }
 });
 
-buildThemePanel();
-applyTheme(localStorage.getItem('ev_theme') || 'candy');
+document.addEventListener('DOMContentLoaded', () => {
+  buildThemePanel();
+  applyTheme(localStorage.getItem('ev_theme') || 'candy');
+});
 </script>
 <!-- GIFT MODAL -->
 <div id="giftModal" onclick="if(event.target===this)closeGiftModal()">
